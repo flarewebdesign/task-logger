@@ -1,4 +1,4 @@
-import tkinter as tk
+import customtkinter as ctk
 import tkinter.ttk as ttk
 import pandas as pd
 from tkinter import messagebox
@@ -11,11 +11,10 @@ class TaskListApp:
         self.rootTaskList.geometry("800x300")
         
         self.task_tree = ttk.Treeview(self.rootTaskList, columns=("id", "date", "task", "start", "start_am_pm", "end", "end_am_pm", "hours"))
-        # Remove extra column
         self.task_tree["show"] = "headings"
-        # Set column headings
+        
         self.task_tree.heading("id", text="ID")
-        self.task_tree.column("id", width=0, stretch=tk.NO)  # Hide ID column
+        self.task_tree.column("id", width=0, stretch=False)
         self.task_tree.heading("date", text="Date")
         self.task_tree.column("date", anchor="w", width=100)
         self.task_tree.heading("task", text="Task")
@@ -32,21 +31,17 @@ class TaskListApp:
         self.task_tree.column("hours", anchor="w", width=100)
         self.task_tree.pack(fill="both", expand=True)
         
-        # Show tasks
         self.show_tasks("task_log.xlsx")
 
-        # Buttons
-        self.refresh_button = ttk.Button(self.rootTaskList, text="Refresh", command=self.refresh)
+        self.refresh_button = ctk.CTkButton(self.rootTaskList, text="Refresh", command=self.refresh)
         self.refresh_button.pack(side="left", padx=(10, 0), pady=(10, 10))
         
-        self.remove_task_button = ttk.Button(self.rootTaskList, text="Remove Task", command=self.remove_task)
+        self.remove_task_button = ctk.CTkButton(self.rootTaskList, text="Remove Task", command=self.remove_task)
         self.remove_task_button.pack(side="left", padx=(10, 0), pady=(10, 10))
 
-    # Refresh treeview
     def refresh(self):
         self.show_tasks("task_log.xlsx")
 
-    # Remove task
     def remove_task(self):
         selected_item = self.task_tree.focus()
         if selected_item == '':
@@ -60,11 +55,9 @@ class TaskListApp:
             df.to_excel("task_log.xlsx", index=False)
             self.task_tree.delete(selected_item)
 
-    # Show tasks
     def show_tasks(self, file_name):
         self.task_tree.delete(*self.task_tree.get_children())
         if not os.path.exists(file_name):
-            # Create a new Excel file with appropriate columns if it doesn't exist
             df = pd.DataFrame(columns=["ID", "Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
             df.to_excel(file_name, index=False)
         else:
@@ -73,14 +66,12 @@ class TaskListApp:
         for index, row in df.iterrows():
             self.task_tree.insert("", "end", values=(row['ID'], row['Date'], row['Task'], f"{row['Start Time']}", row['Start AM/PM'], f"{row['End Time']}", row['End AM/PM'], f"{row['Decimal Hours']}"))
 
-# Main
 if __name__ == '__main__':
-    rootTaskList = tk.Tk()
+    rootTaskList = ctk.CTk()
     TaskListApp(rootTaskList)
     rootTaskList.mainloop()
 
-# Path: TaskLogger-0.0.3/taskLoggerGUI.py
 def show():
-    rootTaskList = tk.Tk()
+    rootTaskList = ctk.CTk()
     TaskListApp(rootTaskList)
     rootTaskList.mainloop()
