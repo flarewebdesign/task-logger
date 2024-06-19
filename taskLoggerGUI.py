@@ -9,7 +9,7 @@ import os
 # Ensure the task log file exists
 def ensure_task_log_exists(file_name="task_log.xlsx"):
     if not os.path.exists(file_name):
-        df = pd.DataFrame(columns=["Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
+        df = pd.DataFrame(columns=["ID", "Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
         df.to_excel(file_name, index=False)
 
 # Call the function to ensure the Excel file exists
@@ -82,8 +82,3 @@ exit_button.grid(row=7, column=1, pady=5)
 
 # Run the root window's main loop
 root.mainloop()
-
-
-
-
-

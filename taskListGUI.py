@@ -10,10 +10,12 @@ class TaskListApp:
         self.rootTaskList.title("Task List")
         self.rootTaskList.geometry("800x300")
         
-        self.task_tree = ttk.Treeview(self.rootTaskList, columns=("date", "task", "start", "start_am_pm", "end", "end_am_pm", "hours"))
+        self.task_tree = ttk.Treeview(self.rootTaskList, columns=("id", "date", "task", "start", "start_am_pm", "end", "end_am_pm", "hours"))
         # Remove extra column
         self.task_tree["show"] = "headings"
         # Set column headings
+        self.task_tree.heading("id", text="ID")
+        self.task_tree.column("id", width=0, stretch=tk.NO)  # Hide ID column
         self.task_tree.heading("date", text="Date")
         self.task_tree.column("date", anchor="w", width=100)
         self.task_tree.heading("task", text="Task")
@@ -50,11 +52,11 @@ class TaskListApp:
         if selected_item == '':
             return
         item = self.task_tree.item(selected_item)
-        task = item['values'][1]
+        task_id = item['values'][0]
         confirm = messagebox.askyesno("Confirm", "Are you sure you want to remove this task?")
         if confirm:
             df = pd.read_excel("task_log.xlsx")
-            df = df[df['Task'] != task]
+            df = df[df['ID'] != task_id]
             df.to_excel("task_log.xlsx", index=False)
             self.task_tree.delete(selected_item)
 
@@ -63,13 +65,13 @@ class TaskListApp:
         self.task_tree.delete(*self.task_tree.get_children())
         if not os.path.exists(file_name):
             # Create a new Excel file with appropriate columns if it doesn't exist
-            df = pd.DataFrame(columns=["Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
+            df = pd.DataFrame(columns=["ID", "Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
             df.to_excel(file_name, index=False)
         else:
             df = pd.read_excel(file_name)
         
         for index, row in df.iterrows():
-            self.task_tree.insert("", "end", values=(row['Date'], row['Task'], f"{row['Start Time']}", row['Start AM/PM'], f"{row['End Time']}", row['End AM/PM'], f"{row['Decimal Hours']}"))
+            self.task_tree.insert("", "end", values=(row['ID'], row['Date'], row['Task'], f"{row['Start Time']}", row['Start AM/PM'], f"{row['End Time']}", row['End AM/PM'], f"{row['Decimal Hours']}"))
 
 # Main
 if __name__ == '__main__':

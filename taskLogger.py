@@ -2,6 +2,7 @@ import openpyxl
 from openpyxl.utils import get_column_letter
 from datetime import datetime
 import os
+import uuid
 
 # Convert time to 24-hour format
 def convert_to_24hour(time, period):
@@ -34,23 +35,17 @@ def add_task_to_log(task_name, date, start_time, start_period, end_time, end_per
         # Create new log file
         wb = openpyxl.Workbook()
         sheet = wb.active
-        sheet.append(["Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
+        sheet.append(["ID", "Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
     
-    task_data = [date, task_name, start_time, start_period, end_time, end_period, hours_worked]
+    # Generate a unique ID for the task
+    task_id = str(uuid.uuid4())
+
+    task_data = [task_id, date, task_name, start_time, start_period, end_time, end_period, hours_worked]
     
-    # Check if task information already exists
-    task_exists = False
-    for row in sheet.iter_rows(values_only=True):
-        if task_data[0:3] == list(row[0:3]):
-            task_exists = True
-            break
- 
-    if not task_exists:
-        sheet.append(task_data)
-        wb.save(task_log)
-        print(f"Task information added to '{task_log}'.")
-    else:
-        print("Task information already exists.")
+    # Append the new task to the sheet
+    sheet.append(task_data)
+    wb.save(task_log)
+    print(f"Task information added to '{task_log}'.")
 
 # Main function
 def main():
@@ -59,18 +54,14 @@ def main():
     while True:
         # Get task information
         task_name = input("Enter task name: ")
-        if task_name == "":
-            break
         date = input("Enter date (YYYY-MM-DD): ")
         start_time = input("Enter start time (HH:MM): ")
         start_period = input("Enter start time period (AM/PM): ")
         end_time = input("Enter end time (HH:MM): ")
         end_period = input("Enter end time period (AM/PM): ")
-        add_task_to_log(task_name, date, start_time, start_period, end_time, end_period, task_log)
-        continue_adding = input("Do you want to continue adding tasks? (yes/no): ")
-        if continue_adding.lower() != "yes":
-            break
 
-# Run main function       
-if __name__ == '__main__':
+        add_task_to_log(task_name, date, start_time, start_period, end_time, end_period, task_log)
+        print("Task added.\n")
+
+if __name__ == "__main__":
     main()
