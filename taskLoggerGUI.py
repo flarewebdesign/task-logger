@@ -84,10 +84,10 @@ def clear_fields(*entries):
             entry.deselect()
 
 view_task_list_button = ctk.CTkButton(frame, text="View Tasks", command=taskListGUI.show)
-view_task_list_button.grid(row=7, column=0, pady=(10, 5), padx=(0, 5))
+view_task_list_button.grid(row=7, column=0, pady=(0, 5), padx=(0, 5))
 
 exit_button = ctk.CTkButton(frame, text="Exit", command=root.destroy)
-exit_button.grid(row=7, column=1, pady=(10, 5), padx=(0, 5))
+exit_button.grid(row=7, column=1, pady=(0, 5), padx=(0, 5))
 
 # Run the root window's main loop
 root.mainloop()
