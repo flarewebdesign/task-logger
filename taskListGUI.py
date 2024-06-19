@@ -2,6 +2,7 @@ import tkinter as tk
 import tkinter.ttk as ttk
 import pandas as pd
 from tkinter import messagebox
+import os
 
 class TaskListApp:
     def __init__(self, rootTaskList):
@@ -10,9 +11,9 @@ class TaskListApp:
         self.rootTaskList.geometry("800x300")
         
         self.task_tree = ttk.Treeview(self.rootTaskList, columns=("date", "task", "start", "start_am_pm", "end", "end_am_pm", "hours"))
-        #remove extra column
+        # Remove extra column
         self.task_tree["show"] = "headings"
-        #set column headings
+        # Set column headings
         self.task_tree.heading("date", text="Date")
         self.task_tree.column("date", anchor="w", width=100)
         self.task_tree.heading("task", text="Task")
@@ -29,21 +30,21 @@ class TaskListApp:
         self.task_tree.column("hours", anchor="w", width=100)
         self.task_tree.pack(fill="both", expand=True)
         
-        #show tasks
+        # Show tasks
         self.show_tasks("task_log.xlsx")
 
-        #buttons
+        # Buttons
         self.refresh_button = ttk.Button(self.rootTaskList, text="Refresh", command=self.refresh)
         self.refresh_button.pack(side="left", padx=(10, 0), pady=(10, 10))
         
         self.remove_task_button = ttk.Button(self.rootTaskList, text="Remove Task", command=self.remove_task)
         self.remove_task_button.pack(side="left", padx=(10, 0), pady=(10, 10))
 
-    #refresh treeview
+    # Refresh treeview
     def refresh(self):
         self.show_tasks("task_log.xlsx")
 
-    #remove task
+    # Remove task
     def remove_task(self):
         selected_item = self.task_tree.focus()
         if selected_item == '':
@@ -57,14 +58,20 @@ class TaskListApp:
             df.to_excel("task_log.xlsx", index=False)
             self.task_tree.delete(selected_item)
 
-    #show tasks
+    # Show tasks
     def show_tasks(self, file_name):
         self.task_tree.delete(*self.task_tree.get_children())
-        df = pd.read_excel(file_name)
+        if not os.path.exists(file_name):
+            # Create a new Excel file with appropriate columns if it doesn't exist
+            df = pd.DataFrame(columns=["Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
+            df.to_excel(file_name, index=False)
+        else:
+            df = pd.read_excel(file_name)
+        
         for index, row in df.iterrows():
             self.task_tree.insert("", "end", values=(row['Date'], row['Task'], f"{row['Start Time']}", row['Start AM/PM'], f"{row['End Time']}", row['End AM/PM'], f"{row['Decimal Hours']}"))
 
-#main
+# Main
 if __name__ == '__main__':
     rootTaskList = tk.Tk()
     TaskListApp(rootTaskList)
@@ -72,12 +79,6 @@ if __name__ == '__main__':
 
 # Path: TaskLogger-0.0.3/taskLoggerGUI.py
 def show():
-        rootTaskList = tk.Tk()
-        TaskListApp(rootTaskList)
-        rootTaskList.mainloop()
-
-
-
-
-
-
+    rootTaskList = tk.Tk()
+    TaskListApp(rootTaskList)
+    rootTaskList.mainloop()
