@@ -45,7 +45,7 @@ class TaskListApp:
         self.refresh_button = ctk.CTkButton(self.rootTaskList, text="Refresh", command=self.refresh)
         self.refresh_button.pack(side="left", padx=(10, 0), pady=(10, 10))
 
-        self.remove_task_button = ctk.CTkButton(self.rootTaskList, text="Remove Task", command=self.remove_task)
+        self.remove_task_button = ctk.CTkButton(self.rootTaskList, text="Remove Task", command=self.remove_task, fg_color="red")
         self.remove_task_button.pack(side="left", padx=(10, 0), pady=(10, 10))
 
     def refresh(self):
