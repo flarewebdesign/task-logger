@@ -4,11 +4,12 @@ import taskListGUI
 import datetime
 import pandas as pd
 import os
+import pytz
 
 # Ensure the task log file exists
 def ensure_task_log_exists(file_name="task_log.xlsx"):
     if not os.path.exists(file_name):
-        df = pd.DataFrame(columns=["ID", "Start Date", "End Date", "Task", "Start Time", "Start AM/PM", "End Time", "End AM/PM", "Decimal Hours"])
+        df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID"])
         df.to_excel(file_name, index=False)
 
 # Call the function to ensure the Excel file exists
@@ -17,27 +18,30 @@ ensure_task_log_exists()
 # Define the root window
 root = ctk.CTk()
 root.title("Task Logger")
-root.geometry("345x345")
+root.geometry("350x380")
 
-ctk.set_appearance_mode("system")
+# Set appearance mode
+ctk.set_appearance_mode("system")  # Options: "dark", "light", "system"
 
-frame = ctk.CTkFrame(root, fg_color="transparent")
+# Define the frame for the widgets
+frame = ctk.CTkFrame(root, fg_color="transparent")  # Use transparent background
 frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-# Define the widgets
+# Define the widgets with improved spacing
 task_name_label = ctk.CTkLabel(frame, text="Task Name:")
 task_name_label.grid(row=0, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
 
 task_name_entry = ctk.CTkEntry(frame)
 task_name_entry.grid(row=0, column=1, pady=(0, 5), padx=(0, 5))
 
-start_date_label = ctk.CTkLabel(frame, text="Start Date (YYYY-MM-DD):")
-start_date_label.grid(row=1, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+date_label = ctk.CTkLabel(frame, text="Start Date (YYYY-MM-DD):")
+date_label.grid(row=1, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
 
-start_date_entry = ctk.CTkEntry(frame)
-start_date_entry.grid(row=1, column=1, pady=(0, 5), padx=(0, 5))
+# Populate the date field with today's date
+date_entry = ctk.CTkEntry(frame)
+date_entry.grid(row=1, column=1, pady=(0, 5), padx=(0, 5))
 today = datetime.datetime.now().strftime("%Y-%m-%d")
-start_date_entry.insert(0, today)
+date_entry.insert(0, today)
 
 start_time_label = ctk.CTkLabel(frame, text="Start Time (HH:MM):")
 start_time_label.grid(row=2, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
@@ -70,26 +74,50 @@ end_period_label.grid(row=6, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
 end_period_toggle = ctk.CTkSwitch(frame, text="AM/PM")
 end_period_toggle.grid(row=6, column=1, pady=(0, 5), padx=(0, 5))
 
+# Timezone selection
+timezone_label = ctk.CTkLabel(frame, text="Timezone:")
+timezone_label.grid(row=7, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+
+timezones = pytz.all_timezones
+timezone_combobox = ctk.CTkComboBox(frame, values=timezones)
+timezone_combobox.grid(row=7, column=1, pady=(0, 5), padx=(0, 5))
+timezone_combobox.set('UTC')  # Default value
+
 def get_period(toggle):
     return "PM" if toggle.get() else "AM"
 
-add_task_button = ctk.CTkButton(frame, text="Add Task", command=lambda: taskLogger.add_task_to_log(task_name_entry.get(), start_date_entry.get(), end_date_entry.get(), start_time_entry.get(), get_period(start_period_toggle), end_time_entry.get(), get_period(end_period_toggle), "task_log.xlsx"))
-add_task_button.grid(row=7, column=0, pady=(10, 5), padx=(0, 5))
+def add_task():
+    task_name = task_name_entry.get()
+    start_date = date_entry.get()
+    start_time = start_time_entry.get()
+    start_period = get_period(start_period_toggle)
+    end_date = end_date_entry.get()
+    end_time = end_time_entry.get()
+    end_period = get_period(end_period_toggle)
+    timezone = timezone_combobox.get()
+    taskLogger.add_task_to_log(task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, "task_log.xlsx")
 
-clear_fields_button = ctk.CTkButton(frame, text="Clear Fields", command=lambda: clear_fields(task_name_entry, start_date_entry, end_date_entry, start_time_entry, start_period_toggle, end_time_entry, end_period_toggle))
-clear_fields_button.grid(row=7, column=1, pady=(10, 5), padx=(0, 5))
+add_task_button = ctk.CTkButton(frame, text="Add Task", command=add_task)
+add_task_button.grid(row=8, column=0, pady=(10, 5), padx=(0, 5))
 
+clear_fields_button = ctk.CTkButton(frame, text="Clear Fields", command=lambda: clear_fields(task_name_entry, date_entry, end_date_entry, start_time_entry, start_period_toggle, end_time_entry, end_period_toggle, timezone_combobox))
+clear_fields_button.grid(row=8, column=1, pady=(10, 5), padx=(0, 5))
+
+# Define the function to clear the fields
 def clear_fields(*entries):
     for entry in entries:
         if isinstance(entry, ctk.CTkEntry):
             entry.delete(0, 'end')
         elif isinstance(entry, ctk.CTkSwitch):
             entry.deselect()
+        elif isinstance(entry, ctk.CTkComboBox):
+            entry.set('UTC')
 
 view_task_list_button = ctk.CTkButton(frame, text="View Tasks", command=taskListGUI.show)
-view_task_list_button.grid(row=8, column=0, pady=(0, 5), padx=(0, 5))
+view_task_list_button.grid(row=9, column=0, pady=(0, 5), padx=(0, 5))
 
 exit_button = ctk.CTkButton(frame, text="Exit", command=root.destroy)
-exit_button.grid(row=8, column=1, pady=(0, 5), padx=(0, 5))
+exit_button.grid(row=9, column=1, pady=(0, 5), padx=(0, 5))
 
+# Run the root window's main loop
 root.mainloop()
