@@ -10,7 +10,7 @@ class TaskListApp:
     def __init__(self, rootTaskList):
         self.rootTaskList = rootTaskList
         self.rootTaskList.title("Task List")
-        self.rootTaskList.geometry("950x300")
+        self.rootTaskList.geometry("1000x300")
 
         self.setup_treeview()
         self.setup_buttons()
@@ -26,10 +26,10 @@ class TaskListApp:
             "task": {"text": "Task", "width": 150, "anchor": "w", "stretch": True},
             "start_date": {"text": "Start Date", "width": 100, "anchor": "w", "stretch": True},
             "start_time": {"text": "Start Time", "width": 100, "anchor": "w", "stretch": True},
-            "start_am_pm": {"text": "Start AM/PM", "width": 50, "anchor": "center", "stretch": True},
+            "start_am_pm": {"text": "Start AM/PM", "width": 80, "anchor": "center", "stretch": True},
             "end_date": {"text": "End Date", "width": 100, "anchor": "w", "stretch": True},
             "end_time": {"text": "End Time", "width": 100, "anchor": "w", "stretch": True},
-            "end_am_pm": {"text": "End AM/PM", "width": 50, "anchor": "center", "stretch": True},
+            "end_am_pm": {"text": "End AM/PM", "width": 80, "anchor": "center", "stretch": True},
             "timezone": {"text": "Timezone", "width": 150, "anchor": "w", "stretch": True},
             "hours": {"text": "Decimal Hours", "width": 100, "anchor": "w", "stretch": True},
             "event_id": {"text": "Event ID", "width": 0, "stretch": False, "anchor": "center"},
