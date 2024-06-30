@@ -62,3 +62,9 @@ celerybeat-schedule
 .env.local
 .env.*.local
 .
+
+# files
+config.json
+credentials.json
+task_log.xlsx
+token.json
