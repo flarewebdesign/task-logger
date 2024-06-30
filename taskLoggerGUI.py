@@ -1,3 +1,5 @@
+# taskLoggerGUI.py - A GUI for the taskLogger module
+
 import customtkinter as ctk
 import taskLogger
 import taskListGUI
@@ -12,7 +14,7 @@ CONFIG_FILE = "config.json"
 # Ensure the task log file exists
 def ensure_task_log_exists(file_name="task_log.xlsx"):
     if not os.path.exists(file_name):
-        df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID"])
+        df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID", "Attendees"])
         df.to_excel(file_name, index=False)
 
 # Call the function to ensure the Excel file exists
@@ -41,7 +43,7 @@ default_timezone = config.get("timezone", "UTC")
 # Define the root window
 root = ctk.CTk()
 root.title("Task Logger")
-root.geometry("350x430")
+root.geometry("350x465")
 
 # Set appearance mode
 ctk.set_appearance_mode("system")  # Options: "dark", "light", "system"
@@ -62,7 +64,9 @@ def add_task():
     end_time = end_time_entry.get()
     end_period = get_period(end_period_toggle)
     timezone = timezone_combobox.get()
-    taskLogger.add_task_to_log(task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, "task_log.xlsx")
+    attendees = attendees_entry.get().split(',')
+    attendees = [email.strip() for email in attendees if email.strip()]  # Clean attendees list
+    taskLogger.add_task_to_log(task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, "task_log.xlsx", attendees)
 
 def save_timezone():
     config["timezone"] = timezone_combobox.get()
@@ -125,16 +129,22 @@ timezone_combobox = ctk.CTkComboBox(frame, values=timezones)
 timezone_combobox.grid(row=7, column=1, pady=(0, 5), padx=(0, 5))
 timezone_combobox.set(default_timezone)  # Set default value
 
+attendees_label = ctk.CTkLabel(frame, text="Attendees (comma sep):")
+attendees_label.grid(row=8, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+
+attendees_entry = ctk.CTkEntry(frame)
+attendees_entry.grid(row=8, column=1, pady=(0, 5), padx=(0, 5))
+
 save_timezone_button = ctk.CTkButton(frame, text="Save Timezone", command=save_timezone)
-save_timezone_button.grid(row=8, column=0, columnspan=2, pady=(15, 0), padx=(10, 15), sticky='ew')
+save_timezone_button.grid(row=9, column=0, columnspan=2, pady=(15, 0), padx=(10, 15), sticky='ew')
 
 button_frame = ctk.CTkFrame(frame, fg_color="transparent")
-button_frame.grid(row=9, column=0, columnspan=2, pady=(5, 5), padx=(5, 5), sticky='ew')
+button_frame.grid(row=10, column=0, columnspan=2, pady=(5, 5), padx=(5, 5), sticky='ew')
 
 add_task_button = ctk.CTkButton(button_frame, text="Add Task", command=add_task, fg_color="green")
 add_task_button.grid(row=0, column=0, pady=(5, 5), padx=(5, 5), sticky='ew')
 
-clear_fields_button = ctk.CTkButton(button_frame, text="Clear Fields", command=lambda: clear_fields(task_name_entry, date_entry, end_date_entry, start_time_entry, start_period_toggle, end_time_entry, end_period_toggle, timezone_combobox))
+clear_fields_button = ctk.CTkButton(button_frame, text="Clear Fields", command=lambda: clear_fields(task_name_entry, date_entry, end_date_entry, start_time_entry, start_period_toggle, end_time_entry, end_period_toggle, timezone_combobox, attendees_entry))
 clear_fields_button.grid(row=0, column=1, pady=(5, 5), padx=(5, 5), sticky='ew')
 
 view_task_list_button = ctk.CTkButton(button_frame, text="View Tasks", command=taskListGUI.show)

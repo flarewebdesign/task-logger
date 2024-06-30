@@ -1,3 +1,5 @@
+# taskLogger.py
+
 import openpyxl
 from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta
@@ -32,7 +34,7 @@ def authenticate_google_calendar():
     service = build('calendar', 'v3', credentials=creds)
     return service
 
-def add_event_to_calendar(task_id, task_name, start_datetime, end_datetime, timezone):
+def add_event_to_calendar(task_id, task_name, start_datetime, end_datetime, timezone, attendees=None):
     service = authenticate_google_calendar()
     event = {
         'summary': f'{task_id} - {task_name}',
@@ -45,6 +47,9 @@ def add_event_to_calendar(task_id, task_name, start_datetime, end_datetime, time
             'timeZone': timezone,
         },
     }
+    if attendees:
+        event['attendees'] = [{'email': email.strip()} for email in attendees if email.strip()]
+    
     event = service.events().insert(calendarId='primary', body=event).execute()
     return event['id']
 
@@ -63,7 +68,7 @@ def convert_to_24hour(time, period):
     return f"{hour:02d}:{minute}"
 
 # Add task information to log
-def add_task_to_log(task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, task_log):
+def add_task_to_log(task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, task_log, attendees=None):
     try:
         start_time_24 = convert_to_24hour(start_time, start_period)
         start_datetime = datetime.strptime(f"{start_date} {start_time_24}", '%Y-%m-%d %H:%M')
@@ -84,8 +89,8 @@ def add_task_to_log(task_name, start_date, start_time, start_period, end_date, e
         wb, sheet = open_task_log(task_log)
 
         task_id = str(uuid.uuid4())
-        event_id = add_event_to_calendar(task_id, task_name, start_datetime, end_datetime, timezone)
-        task_data = [task_id, task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, hours_worked, event_id]
+        event_id = add_event_to_calendar(task_id, task_name, start_datetime, end_datetime, timezone, attendees)
+        task_data = [task_id, task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, hours_worked, event_id, ",".join(attendees) if attendees else ""]
 
         sheet.append(task_data)
         wb.save(task_log)
@@ -94,7 +99,7 @@ def add_task_to_log(task_name, start_date, start_time, start_period, end_date, e
         print(f"Error adding task to log: {e}")
 
 def open_task_log(task_log):
-    headers = ["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID"]
+    headers = ["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID", "Attendees"]
     if os.path.exists(task_log):
         wb = openpyxl.load_workbook(task_log)
         sheet = wb.active
@@ -124,8 +129,10 @@ def main():
         end_time = input("Enter end time (HH:MM): ")
         end_period = input("Enter end time period (AM/PM): ")
         timezone = input("Enter timezone (e.g., America/Detroit): ")
+        attendees_input = input("Enter attendees (comma separated emails, leave blank if none): ")
+        attendees = attendees_input.split(',') if attendees_input else []
 
-        add_task_to_log(task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, task_log)
+        add_task_to_log(task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, task_log, attendees)
         print("Task added.\n")
 
 if __name__ == "__main__":

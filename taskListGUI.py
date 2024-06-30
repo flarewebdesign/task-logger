@@ -1,3 +1,5 @@
+# taskListGUI.py
+
 import customtkinter as ctk
 import tkinter.ttk as ttk
 import pytz
@@ -61,7 +63,7 @@ class TaskListApp:
             return
         item = self.task_tree.item(selected_item)
         task_id = item['values'][0]
-        event_id = item['values'][10]  # Assuming the 11th column contains the Event ID
+        event_id = item['values'][10]
         confirm = messagebox.askyesno("Confirm", "Are you sure you want to remove this task?")
         if confirm:
             df = pd.read_excel("task_log.xlsx")
@@ -84,7 +86,7 @@ class TaskListApp:
         # Load the details into the input fields
         modify_window = ctk.CTkToplevel(self.rootTaskList)
         modify_window.title("Modify Task")
-        modify_window.geometry("350x350")
+        modify_window.geometry("350x380")
         
         modify_frame = ctk.CTkFrame(modify_window, fg_color="transparent")
         modify_frame.pack(pady=20, padx=20, fill="both", expand=True)
@@ -149,6 +151,13 @@ class TaskListApp:
         timezone_combobox.grid(row=7, column=1, pady=(0, 5), padx=(0, 5))
         timezone_combobox.set(task_details[8])
 
+        attendees_label = ctk.CTkLabel(modify_frame, text="Attendees (comma sep):")
+        attendees_label.grid(row=8, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+
+        attendees_entry = ctk.CTkEntry(modify_frame)
+        attendees_entry.grid(row=8, column=1, pady=(0, 5), padx=(0, 5))
+        attendees_entry.insert(0, task_details[11] if task_details[11] and task_details[11] != "nan" else "")
+
         def save_changes():
             task_name = task_name_entry.get()
             start_date = date_entry.get()
@@ -158,16 +167,23 @@ class TaskListApp:
             end_time = end_time_entry.get()
             end_period = "PM" if end_period_toggle.get() else "AM"
             timezone = timezone_combobox.get()
-            
+            attendees = attendees_entry.get().split(',')
+            attendees = [email.strip() for email in attendees if email.strip()]  # Clean attendees list
+
             # Convert to datetime objects
             start_time_24 = taskLogger.convert_to_24hour(start_time, start_period)
             start_datetime = datetime.strptime(f"{start_date} {start_time_24}", '%Y-%m-%d %H:%M')
             end_time_24 = taskLogger.convert_to_24hour(end_time, end_period)
             end_datetime = datetime.strptime(f"{end_date} {end_time_24}", '%Y-%m-%d %H:%M')
-            
+
             # Update task in the Excel file
             df = pd.read_excel("task_log.xlsx")
-            df.loc[df['ID'] == task_details[0], ['Task', 'Start Date', 'Start Time', 'Start AM/PM', 'End Date', 'End Time', 'End AM/PM', 'Timezone']] = [task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone]
+
+            # Cast 'Attendees' column to string type
+            df['Attendees'] = df['Attendees'].astype(str)
+
+            df.loc[df['ID'] == task_details[0], ['Task', 'Start Date', 'Start Time', 'Start AM/PM', 'End Date', 'End Time', 'End AM/PM', 'Timezone', 'Attendees']] = [
+                task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, ",".join(attendees) if attendees else ""]
 
             # Calculate and update Decimal Hours
             tz = pytz.timezone(timezone)
@@ -183,32 +199,33 @@ class TaskListApp:
                 taskLogger.remove_event_from_calendar(task_details[10])
             except Exception as e:
                 print(f"Error removing event from calendar: {e}")
-            
-            new_event_id = taskLogger.add_event_to_calendar(task_details[0], task_name, start_datetime, end_datetime, timezone)
+
+            new_event_id = taskLogger.add_event_to_calendar(task_details[0], task_name, start_datetime, end_datetime, timezone, attendees)
             df.loc[df['ID'] == task_details[0], 'Event ID'] = new_event_id
             df.to_excel("task_log.xlsx", index=False)
 
             self.refresh()
             modify_window.destroy()
 
+
         save_button = ctk.CTkButton(modify_frame, text="Save Changes", command=save_changes, fg_color="green")
-        save_button.grid(row=8, column=0, columnspan=2, pady=(10, 5), padx=(0, 5), sticky='ew')
+        save_button.grid(row=9, column=0, columnspan=2, pady=(10, 5), padx=(0, 5), sticky='ew')
 
     def show_tasks(self, file_name):
         self.task_tree.delete(*self.task_tree.get_children())
         if not os.path.exists(file_name):
-            df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID"])
+            df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID", "Attendees"])
             df.to_excel(file_name, index=False)
         else:
             df = pd.read_excel(file_name)
             if "Start Date" not in df.columns or "End Date" not in df.columns or "Event ID" not in df.columns:
-                df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID"])
+                df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID", "Attendees"])
                 df.to_excel(file_name, index=False)
 
         for index, row in df.iterrows():
-            self.task_tree.insert("", "end", values=(row['ID'], row['Task'], row['Start Date'], row['Start Time'], row['Start AM/PM'], row['End Date'], row['End Time'], row['End AM/PM'], row['Timezone'], row['Decimal Hours'], row.get('Event ID', '')))
+            self.task_tree.insert("", "end", values=(row['ID'], row['Task'], row['Start Date'], row['Start Time'], row['Start AM/PM'], row['End Date'], row['End Time'], row['End AM/PM'], row['Timezone'], row['Decimal Hours'], row.get('Event ID', ''), row.get('Attendees', '')))
 
-if __name__ == '__name__':
+if __name__ == '__main__':
     rootTaskList = ctk.CTk()
     TaskListApp(rootTaskList)
     rootTaskList.mainloop()
