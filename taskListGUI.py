@@ -84,7 +84,7 @@ class TaskListApp:
         # Load the details into the input fields
         modify_window = ctk.CTkToplevel(self.rootTaskList)
         modify_window.title("Modify Task")
-        modify_window.geometry("350x350")
+        modify_window.geometry("350x400")
         
         modify_frame = ctk.CTkFrame(modify_window, fg_color="transparent")
         modify_frame.pack(pady=20, padx=20, fill="both", expand=True)
@@ -168,6 +168,14 @@ class TaskListApp:
             # Update task in the Excel file
             df = pd.read_excel("task_log.xlsx")
             df.loc[df['ID'] == task_details[0], ['Task', 'Start Date', 'Start Time', 'Start AM/PM', 'End Date', 'End Time', 'End AM/PM', 'Timezone']] = [task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone]
+
+            # Calculate and update Decimal Hours
+            tz = pytz.timezone(timezone)
+            start_datetime = tz.localize(start_datetime)
+            end_datetime = tz.localize(end_datetime)
+            hours_worked = (end_datetime - start_datetime).total_seconds() / 3600
+            df.loc[df['ID'] == task_details[0], 'Decimal Hours'] = hours_worked
+
             df.to_excel("task_log.xlsx", index=False)
 
             # Update the event in Google Calendar
@@ -200,7 +208,7 @@ class TaskListApp:
         for index, row in df.iterrows():
             self.task_tree.insert("", "end", values=(row['ID'], row['Task'], row['Start Date'], row['Start Time'], row['Start AM/PM'], row['End Date'], row['End Time'], row['End AM/PM'], row['Timezone'], row['Decimal Hours'], row.get('Event ID', '')))
 
-if __name__ == '__main__':
+if __name__ == '__name__':
     rootTaskList = ctk.CTk()
     TaskListApp(rootTaskList)
     rootTaskList.mainloop()
