@@ -84,7 +84,7 @@ class TaskListApp:
         # Load the details into the input fields
         modify_window = ctk.CTkToplevel(self.rootTaskList)
         modify_window.title("Modify Task")
-        modify_window.geometry("350x400")
+        modify_window.geometry("350x350")
         
         modify_frame = ctk.CTkFrame(modify_window, fg_color="transparent")
         modify_frame.pack(pady=20, padx=20, fill="both", expand=True)
