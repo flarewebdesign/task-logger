@@ -37,7 +37,7 @@ def authenticate_google_calendar():
 def add_event_to_calendar(task_id, task_name, start_datetime, end_datetime, timezone, attendees=None):
     service = authenticate_google_calendar()
     event = {
-        'summary': f'{task_id} - {task_name}',
+        'summary': f'{task_name} - {task_id}',
         'start': {
             'dateTime': start_datetime.isoformat(),
             'timeZone': timezone,
