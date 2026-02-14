@@ -1,236 +1,301 @@
 # taskListGUI.py
 
-import customtkinter as ctk
-import tkinter.ttk as ttk
-import pytz
-import pandas as pd
-from tkinter import messagebox
-import os
-import taskLogger
 from datetime import datetime
+import tkinter.ttk as ttk
+from tkinter import messagebox
 
-class TaskListApp:
-    def __init__(self, rootTaskList):
-        self.rootTaskList = rootTaskList
-        self.rootTaskList.title("Task List")
-        self.rootTaskList.geometry("1000x300")
+import customtkinter as ctk
+import pandas as pd
+import pytz
 
-        self.setup_treeview()
-        self.setup_buttons()
+import taskLogger
 
-        self.show_tasks("task_log.xlsx")
 
-    def setup_treeview(self):
-        self.task_tree = ttk.Treeview(self.rootTaskList, columns=("id", "task", "start_date", "start_time", "start_am_pm", "end_date", "end_time", "end_am_pm", "timezone", "hours", "event_id"))
-        self.task_tree["show"] = "headings"
+class TaskListPanel(ctk.CTkFrame):
+    def __init__(self, master, get_config, task_log="task_log.xlsx", on_task_changed=None):
+        super().__init__(master, fg_color="transparent")
+        self.get_config = get_config
+        self.task_log = task_log
+        self.on_task_changed = on_task_changed
+        self.timezones = pytz.common_timezones
 
-        columns = {
-            "id": {"text": "ID", "width": 0, "stretch": False, "anchor": "center"},
-            "task": {"text": "Task", "width": 150, "anchor": "w", "stretch": True},
-            "start_date": {"text": "Start Date", "width": 100, "anchor": "w", "stretch": True},
-            "start_time": {"text": "Start Time", "width": 100, "anchor": "w", "stretch": True},
-            "start_am_pm": {"text": "Start AM/PM", "width": 80, "anchor": "center", "stretch": True},
-            "end_date": {"text": "End Date", "width": 100, "anchor": "w", "stretch": True},
-            "end_time": {"text": "End Time", "width": 100, "anchor": "w", "stretch": True},
-            "end_am_pm": {"text": "End AM/PM", "width": 80, "anchor": "center", "stretch": True},
-            "timezone": {"text": "Timezone", "width": 150, "anchor": "w", "stretch": True},
-            "hours": {"text": "Decimal Hours", "width": 100, "anchor": "w", "stretch": True},
-            "event_id": {"text": "Event ID", "width": 0, "stretch": False, "anchor": "center"},
+        self._setup_treeview()
+        self._setup_buttons()
+        self.refresh()
+
+    def _setup_treeview(self):
+        tree_container = ctk.CTkFrame(self, fg_color="transparent")
+        tree_container.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+
+        columns = ("id", "task", "start", "end", "timezone", "hours", "attendees", "event_id")
+        self.task_tree = ttk.Treeview(tree_container, columns=columns, show="headings", selectmode="browse")
+
+        column_specs = {
+            "id": {"text": "ID", "width": 0, "anchor": "w", "stretch": False},
+            "task": {"text": "Task", "width": 220, "anchor": "w", "stretch": True},
+            "start": {"text": "Start", "width": 170, "anchor": "w", "stretch": True},
+            "end": {"text": "End", "width": 170, "anchor": "w", "stretch": True},
+            "timezone": {"text": "Timezone", "width": 130, "anchor": "w", "stretch": True},
+            "hours": {"text": "Hours", "width": 80, "anchor": "e", "stretch": False},
+            "attendees": {"text": "Attendees", "width": 280, "anchor": "w", "stretch": True},
+            "event_id": {"text": "Event ID", "width": 0, "anchor": "w", "stretch": False},
         }
 
-        for col, specs in columns.items():
-            self.task_tree.heading(col, text=specs["text"])
-            self.task_tree.column(col, anchor=specs["anchor"], width=specs["width"], stretch=specs["stretch"])
+        for column, spec in column_specs.items():
+            self.task_tree.heading(column, text=spec["text"])
+            self.task_tree.column(
+                column,
+                anchor=spec["anchor"],
+                width=spec["width"],
+                stretch=spec["stretch"],
+            )
 
-        self.task_tree.pack(fill="both", expand=True)
+        y_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.task_tree.yview)
+        self.task_tree.configure(yscrollcommand=y_scrollbar.set)
 
-    def setup_buttons(self):
-        self.refresh_button = ctk.CTkButton(self.rootTaskList, text="Refresh", command=self.refresh)
-        self.refresh_button.pack(side="left", padx=(10, 0), pady=(10, 10))
+        self.task_tree.pack(side="left", fill="both", expand=True)
+        y_scrollbar.pack(side="right", fill="y")
 
-        self.remove_task_button = ctk.CTkButton(self.rootTaskList, text="Remove Task", command=self.remove_task, fg_color="red")
-        self.remove_task_button.pack(side="left", padx=(10, 0), pady=(10, 10))
+        self.task_tree.bind("<Double-1>", lambda _event: self.modify_task())
 
-        self.modify_task_button = ctk.CTkButton(self.rootTaskList, text="Modify Task", command=self.modify_task)
-        self.modify_task_button.pack(side="left", padx=(10, 0), pady=(10, 10))
+    def _setup_buttons(self):
+        controls = ctk.CTkFrame(self, fg_color="transparent")
+        controls.pack(fill="x", padx=10, pady=10)
+
+        refresh_button = ctk.CTkButton(controls, text="Refresh", command=self.refresh)
+        refresh_button.pack(side="left", padx=(0, 10))
+
+        modify_button = ctk.CTkButton(controls, text="Edit Selected", command=self.modify_task)
+        modify_button.pack(side="left", padx=(0, 10))
+
+        remove_button = ctk.CTkButton(
+            controls,
+            text="Delete Selected",
+            command=self.remove_task,
+            fg_color="#B93838",
+            hover_color="#992E2E",
+        )
+        remove_button.pack(side="left")
+
+    def _selected_task_id(self):
+        selected_item = self.task_tree.focus()
+        if not selected_item:
+            return ""
+        values = self.task_tree.item(selected_item).get("values", [])
+        return str(values[0]) if values else ""
 
     def refresh(self):
-        self.show_tasks("task_log.xlsx")
+        self.task_tree.delete(*self.task_tree.get_children())
+        df = taskLogger.load_task_log(self.task_log)
+
+        for _, row in df.iterrows():
+            task_id = self._safe_text(row.get("ID"))
+            task_name = self._safe_text(row.get("Task"))
+            start = self._format_datetime_display(row, "Start Date", "Start Time", "Start AM/PM")
+            end = self._format_datetime_display(row, "End Date", "End Time", "End AM/PM")
+            timezone = self._safe_text(row.get("Timezone"))
+            attendees = self._safe_text(row.get("Attendees"))
+            event_id = self._safe_text(row.get("Event ID"))
+
+            hours_value = row.get("Decimal Hours")
+            hours_text = ""
+            if not pd.isna(hours_value):
+                try:
+                    hours_text = f"{float(hours_value):.2f}"
+                except (TypeError, ValueError):
+                    hours_text = self._safe_text(hours_value)
+
+            self.task_tree.insert(
+                "",
+                "end",
+                values=(task_id, task_name, start, end, timezone, hours_text, attendees, event_id),
+            )
 
     def remove_task(self):
-        selected_item = self.task_tree.focus()
-        if selected_item == '':
+        task_id = self._selected_task_id()
+        if not task_id:
+            messagebox.showwarning("No selection", "Select a task first.")
             return
-        item = self.task_tree.item(selected_item)
-        task_id = item['values'][0]
-        event_id = item['values'][10]
-        confirm = messagebox.askyesno("Confirm", "Are you sure you want to remove this task?")
-        if confirm:
-            df = pd.read_excel("task_log.xlsx")
-            df = df[df['ID'] != task_id]
-            df.to_excel("task_log.xlsx", index=False)
-            self.task_tree.delete(selected_item)
-            try:
-                taskLogger.remove_event_from_calendar(event_id)
-            except Exception as e:
-                print(f"Error removing event from calendar: {e}")
+
+        confirmed = messagebox.askyesno("Delete Task", "Delete the selected task?")
+        if not confirmed:
+            return
+
+        try:
+            config = self.get_config()
+            result = taskLogger.remove_task_from_log(
+                task_id=task_id,
+                task_log=self.task_log,
+                sync_to_google=bool(config.get("google_sync_enabled")),
+                credentials_path=config.get("google_credentials_path", "credentials.json"),
+                token_path=config.get("google_token_path", "token.json"),
+                calendar_id=config.get("google_calendar_id", "primary"),
+            )
+        except Exception as exc:
+            messagebox.showerror("Delete failed", str(exc))
+            return
+
+        self.refresh()
+        if self.on_task_changed:
+            self.on_task_changed()
+
+        if result.get("calendar_error"):
+            messagebox.showwarning(
+                "Task deleted locally",
+                "The task was deleted locally, but calendar cleanup failed:\n\n"
+                f"{result['calendar_error']}",
+            )
 
     def modify_task(self):
-        selected_item = self.task_tree.focus()
-        if selected_item == '':
-            messagebox.showwarning("Warning", "No task selected.")
+        task_id = self._selected_task_id()
+        if not task_id:
+            messagebox.showwarning("No selection", "Select a task first.")
             return
-        item = self.task_tree.item(selected_item)
-        task_details = item['values']
-        
-        # Load the details into the input fields
-        modify_window = ctk.CTkToplevel(self.rootTaskList)
-        modify_window.title("Modify Task")
-        modify_window.geometry("350x380")
-        
-        modify_frame = ctk.CTkFrame(modify_window, fg_color="transparent")
-        modify_frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-        task_name_label = ctk.CTkLabel(modify_frame, text="Task Name:")
-        task_name_label.grid(row=0, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+        df = taskLogger.load_task_log(self.task_log)
+        matches = df[df["ID"].astype(str) == str(task_id)]
+        if matches.empty:
+            messagebox.showerror("Not found", "Selected task could not be loaded.")
+            return
 
-        task_name_entry = ctk.CTkEntry(modify_frame)
-        task_name_entry.grid(row=0, column=1, pady=(0, 5), padx=(0, 5))
-        task_name_entry.insert(0, task_details[1])
+        row = matches.iloc[0]
+        edit_window = ctk.CTkToplevel(self)
+        edit_window.title("Edit Task")
+        edit_window.geometry("500x440")
+        edit_window.transient(self.winfo_toplevel())
+        edit_window.grab_set()
 
-        date_label = ctk.CTkLabel(modify_frame, text="Start Date (YYYY-MM-DD):")
-        date_label.grid(row=1, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+        form = ctk.CTkFrame(edit_window, fg_color="transparent")
+        form.pack(fill="both", expand=True, padx=20, pady=20)
+        form.grid_columnconfigure(1, weight=1)
 
-        date_entry = ctk.CTkEntry(modify_frame)
-        date_entry.grid(row=1, column=1, pady=(0, 5), padx=(0, 5))
-        date_entry.insert(0, task_details[2])
+        task_name_entry = self._create_labeled_entry(form, 0, "Task Name", self._safe_text(row.get("Task")))
+        start_date_entry = self._create_labeled_entry(form, 1, "Start Date (YYYY-MM-DD)", self._format_date(row.get("Start Date")))
+        start_time_entry = self._create_labeled_entry(form, 2, "Start Time (HH:MM)", self._safe_text(row.get("Start Time")))
 
-        start_time_label = ctk.CTkLabel(modify_frame, text="Start Time (HH:MM):")
-        start_time_label.grid(row=2, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+        start_period = self._safe_text(row.get("Start AM/PM")) or "AM"
+        start_period_menu = ctk.CTkOptionMenu(form, values=["AM", "PM"])
+        start_period_menu.set(start_period if start_period in {"AM", "PM"} else "AM")
+        self._add_field(form, 3, "Start AM/PM", start_period_menu)
 
-        start_time_entry = ctk.CTkEntry(modify_frame)
-        start_time_entry.grid(row=2, column=1, pady=(0, 5), padx=(0, 5))
-        start_time_entry.insert(0, task_details[3])
+        end_date_entry = self._create_labeled_entry(form, 4, "End Date (YYYY-MM-DD)", self._format_date(row.get("End Date")))
+        end_time_entry = self._create_labeled_entry(form, 5, "End Time (HH:MM)", self._safe_text(row.get("End Time")))
 
-        start_period_label = ctk.CTkLabel(modify_frame, text="Start AM/PM:")
-        start_period_label.grid(row=3, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+        end_period = self._safe_text(row.get("End AM/PM")) or "AM"
+        end_period_menu = ctk.CTkOptionMenu(form, values=["AM", "PM"])
+        end_period_menu.set(end_period if end_period in {"AM", "PM"} else "AM")
+        self._add_field(form, 6, "End AM/PM", end_period_menu)
 
-        start_period_toggle = ctk.CTkSwitch(modify_frame, text="AM/PM")
-        start_period_toggle.grid(row=3, column=1, pady=(0, 5), padx=(0, 5))
-        if task_details[4] == "PM":
-            start_period_toggle.select()
+        timezone_combo = ctk.CTkComboBox(form, values=self.timezones)
+        timezone_combo.set(self._safe_text(row.get("Timezone")) or "UTC")
+        self._add_field(form, 7, "Timezone", timezone_combo)
 
-        end_date_label = ctk.CTkLabel(modify_frame, text="End Date (YYYY-MM-DD):")
-        end_date_label.grid(row=4, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
+        attendees_entry = self._create_labeled_entry(
+            form,
+            8,
+            "Attendees (comma separated)",
+            self._safe_text(row.get("Attendees")),
+        )
 
-        end_date_entry = ctk.CTkEntry(modify_frame)
-        end_date_entry.grid(row=4, column=1, pady=(0, 5), padx=(0, 5))
-        end_date_entry.insert(0, task_details[5])
+        button_row = ctk.CTkFrame(form, fg_color="transparent")
+        button_row.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(14, 0))
 
-        end_time_label = ctk.CTkLabel(modify_frame, text="End Time (HH:MM):")
-        end_time_label.grid(row=5, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
-
-        end_time_entry = ctk.CTkEntry(modify_frame)
-        end_time_entry.grid(row=5, column=1, pady=(0, 5), padx=(0, 5))
-        end_time_entry.insert(0, task_details[6])
-
-        end_period_label = ctk.CTkLabel(modify_frame, text="End AM/PM:")
-        end_period_label.grid(row=6, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
-
-        end_period_toggle = ctk.CTkSwitch(modify_frame, text="AM/PM")
-        end_period_toggle.grid(row=6, column=1, pady=(0, 5), padx=(0, 5))
-        if task_details[7] == "PM":
-            end_period_toggle.select()
-
-        # Timezone selection
-        timezone_label = ctk.CTkLabel(modify_frame, text="Timezone:")
-        timezone_label.grid(row=7, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
-
-        timezones = pytz.all_timezones
-        timezone_combobox = ctk.CTkComboBox(modify_frame, values=timezones)
-        timezone_combobox.grid(row=7, column=1, pady=(0, 5), padx=(0, 5))
-        timezone_combobox.set(task_details[8])
-
-        attendees_label = ctk.CTkLabel(modify_frame, text="Attendees (comma sep):")
-        attendees_label.grid(row=8, column=0, sticky='W', pady=(0, 5), padx=(0, 5))
-
-        attendees_entry = ctk.CTkEntry(modify_frame)
-        attendees_entry.grid(row=8, column=1, pady=(0, 5), padx=(0, 5))
-        attendees_entry.insert(0, task_details[11] if task_details[11] and task_details[11] != "nan" else "")
+        cancel_button = ctk.CTkButton(button_row, text="Cancel", command=edit_window.destroy)
+        cancel_button.pack(side="left", padx=(0, 10))
 
         def save_changes():
-            task_name = task_name_entry.get()
-            start_date = date_entry.get()
-            start_time = start_time_entry.get()
-            start_period = "PM" if start_period_toggle.get() else "AM"
-            end_date = end_date_entry.get()
-            end_time = end_time_entry.get()
-            end_period = "PM" if end_period_toggle.get() else "AM"
-            timezone = timezone_combobox.get()
-            attendees = attendees_entry.get().split(',')
-            attendees = [email.strip() for email in attendees if email.strip()]  # Clean attendees list
-
-            # Convert to datetime objects
-            start_time_24 = taskLogger.convert_to_24hour(start_time, start_period)
-            start_datetime = datetime.strptime(f"{start_date} {start_time_24}", '%Y-%m-%d %H:%M')
-            end_time_24 = taskLogger.convert_to_24hour(end_time, end_period)
-            end_datetime = datetime.strptime(f"{end_date} {end_time_24}", '%Y-%m-%d %H:%M')
-
-            # Update task in the Excel file
-            df = pd.read_excel("task_log.xlsx")
-
-            # Cast 'Attendees' column to string type
-            df['Attendees'] = df['Attendees'].astype(str)
-
-            df.loc[df['ID'] == task_details[0], ['Task', 'Start Date', 'Start Time', 'Start AM/PM', 'End Date', 'End Time', 'End AM/PM', 'Timezone', 'Attendees']] = [
-                task_name, start_date, start_time, start_period, end_date, end_time, end_period, timezone, ",".join(attendees) if attendees else ""]
-
-            # Calculate and update Decimal Hours
-            tz = pytz.timezone(timezone)
-            start_datetime = tz.localize(start_datetime)
-            end_datetime = tz.localize(end_datetime)
-            hours_worked = (end_datetime - start_datetime).total_seconds() / 3600
-            df.loc[df['ID'] == task_details[0], 'Decimal Hours'] = hours_worked
-
-            df.to_excel("task_log.xlsx", index=False)
-
-            # Update the event in Google Calendar
             try:
-                taskLogger.remove_event_from_calendar(task_details[10])
-            except Exception as e:
-                print(f"Error removing event from calendar: {e}")
-
-            new_event_id = taskLogger.add_event_to_calendar(task_details[0], task_name, start_datetime, end_datetime, timezone, attendees)
-            df.loc[df['ID'] == task_details[0], 'Event ID'] = new_event_id
-            df.to_excel("task_log.xlsx", index=False)
+                config = self.get_config()
+                result = taskLogger.update_task_in_log(
+                    task_id=task_id,
+                    task_name=task_name_entry.get(),
+                    start_date=start_date_entry.get(),
+                    start_time=start_time_entry.get(),
+                    start_period=start_period_menu.get(),
+                    end_date=end_date_entry.get(),
+                    end_time=end_time_entry.get(),
+                    end_period=end_period_menu.get(),
+                    timezone=timezone_combo.get(),
+                    task_log=self.task_log,
+                    attendees=attendees_entry.get(),
+                    sync_to_google=bool(config.get("google_sync_enabled")),
+                    credentials_path=config.get("google_credentials_path", "credentials.json"),
+                    token_path=config.get("google_token_path", "token.json"),
+                    calendar_id=config.get("google_calendar_id", "primary"),
+                )
+            except Exception as exc:
+                messagebox.showerror("Save failed", str(exc))
+                return
 
             self.refresh()
-            modify_window.destroy()
+            if self.on_task_changed:
+                self.on_task_changed()
+            edit_window.destroy()
+
+            if result.get("calendar_error"):
+                messagebox.showwarning(
+                    "Saved locally",
+                    "Task changes were saved, but calendar sync failed:\n\n"
+                    f"{result['calendar_error']}",
+                )
+
+        save_button = ctk.CTkButton(button_row, text="Save Changes", command=save_changes, fg_color="#2F8A42")
+        save_button.pack(side="left")
+
+    def _create_labeled_entry(self, parent, row_index, label_text, initial_value):
+        entry = ctk.CTkEntry(parent)
+        entry.insert(0, initial_value)
+        self._add_field(parent, row_index, label_text, entry)
+        return entry
+
+    def _add_field(self, parent, row_index, label_text, widget):
+        label = ctk.CTkLabel(parent, text=label_text)
+        label.grid(row=row_index, column=0, sticky="w", pady=(0, 8), padx=(0, 10))
+        widget.grid(row=row_index, column=1, sticky="ew", pady=(0, 8))
+
+    @staticmethod
+    def _safe_text(value):
+        if pd.isna(value):
+            return ""
+        text = str(value).strip()
+        return "" if text.lower() == "nan" else text
+
+    def _format_date(self, value):
+        if pd.isna(value):
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%Y-%m-%d")
+
+        text = self._safe_text(value)
+        if not text:
+            return ""
+        try:
+            parsed = datetime.strptime(text[:10], "%Y-%m-%d")
+            return parsed.strftime("%Y-%m-%d")
+        except ValueError:
+            return text
+
+    def _format_datetime_display(self, row, date_key, time_key, period_key):
+        date_text = self._format_date(row.get(date_key))
+        time_text = self._safe_text(row.get(time_key))
+        period_text = self._safe_text(row.get(period_key))
+
+        parts = [part for part in [date_text, time_text, period_text] if part]
+        return " ".join(parts)
 
 
-        save_button = ctk.CTkButton(modify_frame, text="Save Changes", command=save_changes, fg_color="green")
-        save_button.grid(row=9, column=0, columnspan=2, pady=(10, 5), padx=(0, 5), sticky='ew')
+if __name__ == "__main__":
+    ctk.set_appearance_mode("system")
+    root = ctk.CTk()
+    root.geometry("1100x600")
+    root.title("Task List")
 
-    def show_tasks(self, file_name):
-        self.task_tree.delete(*self.task_tree.get_children())
-        if not os.path.exists(file_name):
-            df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID", "Attendees"])
-            df.to_excel(file_name, index=False)
-        else:
-            df = pd.read_excel(file_name)
-            if "Start Date" not in df.columns or "End Date" not in df.columns or "Event ID" not in df.columns:
-                df = pd.DataFrame(columns=["ID", "Task", "Start Date", "Start Time", "Start AM/PM", "End Date", "End Time", "End AM/PM", "Timezone", "Decimal Hours", "Event ID", "Attendees"])
-                df.to_excel(file_name, index=False)
-
-        for index, row in df.iterrows():
-            self.task_tree.insert("", "end", values=(row['ID'], row['Task'], row['Start Date'], row['Start Time'], row['Start AM/PM'], row['End Date'], row['End Time'], row['End AM/PM'], row['Timezone'], row['Decimal Hours'], row.get('Event ID', ''), row.get('Attendees', '')))
-
-if __name__ == '__main__':
-    rootTaskList = ctk.CTk()
-    TaskListApp(rootTaskList)
-    rootTaskList.mainloop()
-
-def show():
-    rootTaskList = ctk.CTk()
-    TaskListApp(rootTaskList)
-    rootTaskList.mainloop()
+    config = {
+        "google_sync_enabled": False,
+        "google_credentials_path": "credentials.json",
+        "google_token_path": "token.json",
+        "google_calendar_id": "primary",
+    }
+    panel = TaskListPanel(root, get_config=lambda: config)
+    panel.pack(fill="both", expand=True)
+    root.mainloop()
