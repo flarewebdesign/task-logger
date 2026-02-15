@@ -8,6 +8,7 @@ The app is local-first: task logging works with no Google setup.
 
 - Single-window UI with tabs: `Log Task`, `Task List`, and `Settings`
 - Fast task capture with timezone-aware hour calculations
+- Date input supports both manual typing (`YYYY-MM-DD`) and calendar picking
 - Edit and delete workflows from a table view
 - Local Excel persistence in `task_log.xlsx`
 - Optional Google Calendar sync (opt-in, configurable)

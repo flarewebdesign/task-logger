@@ -12,6 +12,7 @@ import pytz
 
 import taskLogger
 from taskListGUI import TaskListPanel
+from ui_date_picker import open_date_picker
 
 
 CONFIG_FILE = "config.json"
@@ -132,8 +133,13 @@ class TaskLoggerApp:
         self.task_name_entry = ctk.CTkEntry(form, placeholder_text="Task name")
         self._place_field(form, 0, "Task Name", self.task_name_entry, column=0)
 
-        self.start_date_entry = ctk.CTkEntry(form, placeholder_text="YYYY-MM-DD")
-        self._place_field(form, 1, "Start Date", self.start_date_entry, column=0)
+        self.start_date_entry = self._create_date_field(
+            parent=form,
+            row=1,
+            label_text="Start Date",
+            column=0,
+            picker_title="Pick Start Date",
+        )
 
         self.start_time_entry = ctk.CTkEntry(form, placeholder_text="HH:MM")
         self._place_field(form, 2, "Start Time", self.start_time_entry, column=0)
@@ -141,8 +147,13 @@ class TaskLoggerApp:
         self.start_period_menu = ctk.CTkOptionMenu(form, values=["AM", "PM"])
         self._place_field(form, 3, "Start AM/PM", self.start_period_menu, column=0)
 
-        self.end_date_entry = ctk.CTkEntry(form, placeholder_text="YYYY-MM-DD")
-        self._place_field(form, 1, "End Date", self.end_date_entry, column=2)
+        self.end_date_entry = self._create_date_field(
+            parent=form,
+            row=1,
+            label_text="End Date",
+            column=2,
+            picker_title="Pick End Date",
+        )
 
         self.end_time_entry = ctk.CTkEntry(form, placeholder_text="HH:MM")
         self._place_field(form, 2, "End Time", self.end_time_entry, column=2)
@@ -273,6 +284,27 @@ class TaskLoggerApp:
         label = ctk.CTkLabel(parent, text=label_text)
         label.grid(row=row, column=column, sticky="w", pady=(0, 6), padx=(0, 10))
         widget.grid(row=row, column=column + 1, sticky="ew", pady=(0, 6), padx=(0, 16))
+
+    def _create_date_field(self, parent, row, label_text, column, picker_title):
+        label = ctk.CTkLabel(parent, text=label_text)
+        label.grid(row=row, column=column, sticky="w", pady=(0, 6), padx=(0, 10))
+
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.grid(row=row, column=column + 1, sticky="ew", pady=(0, 6), padx=(0, 16))
+        container.grid_columnconfigure(0, weight=1)
+
+        entry = ctk.CTkEntry(container, placeholder_text="YYYY-MM-DD")
+        entry.grid(row=0, column=0, sticky="ew")
+
+        pick_button = ctk.CTkButton(
+            container,
+            text="Pick",
+            width=72,
+            command=lambda: open_date_picker(self.root, entry, title=picker_title),
+        )
+        pick_button.grid(row=0, column=1, padx=(8, 0))
+
+        return entry
 
     def _place_settings_field(self, parent, row, label_text, widget):
         label = ctk.CTkLabel(parent, text=label_text)

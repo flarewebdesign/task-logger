@@ -9,6 +9,7 @@ import pandas as pd
 import pytz
 
 import taskLogger
+from ui_date_picker import open_date_picker
 
 
 class TaskListPanel(ctk.CTkFrame):
@@ -170,7 +171,14 @@ class TaskListPanel(ctk.CTkFrame):
         form.grid_columnconfigure(1, weight=1)
 
         task_name_entry = self._create_labeled_entry(form, 0, "Task Name", self._safe_text(row.get("Task")))
-        start_date_entry = self._create_labeled_entry(form, 1, "Start Date (YYYY-MM-DD)", self._format_date(row.get("Start Date")))
+        start_date_entry = self._create_labeled_date_entry(
+            form,
+            1,
+            "Start Date (YYYY-MM-DD)",
+            self._format_date(row.get("Start Date")),
+            edit_window,
+            "Pick Start Date",
+        )
         start_time_entry = self._create_labeled_entry(form, 2, "Start Time (HH:MM)", self._safe_text(row.get("Start Time")))
 
         start_period = self._safe_text(row.get("Start AM/PM")) or "AM"
@@ -178,7 +186,14 @@ class TaskListPanel(ctk.CTkFrame):
         start_period_menu.set(start_period if start_period in {"AM", "PM"} else "AM")
         self._add_field(form, 3, "Start AM/PM", start_period_menu)
 
-        end_date_entry = self._create_labeled_entry(form, 4, "End Date (YYYY-MM-DD)", self._format_date(row.get("End Date")))
+        end_date_entry = self._create_labeled_date_entry(
+            form,
+            4,
+            "End Date (YYYY-MM-DD)",
+            self._format_date(row.get("End Date")),
+            edit_window,
+            "Pick End Date",
+        )
         end_time_entry = self._create_labeled_entry(form, 5, "End Time (HH:MM)", self._safe_text(row.get("End Time")))
 
         end_period = self._safe_text(row.get("End AM/PM")) or "AM"
@@ -246,6 +261,25 @@ class TaskListPanel(ctk.CTkFrame):
         entry = ctk.CTkEntry(parent)
         entry.insert(0, initial_value)
         self._add_field(parent, row_index, label_text, entry)
+        return entry
+
+    def _create_labeled_date_entry(self, parent, row_index, label_text, initial_value, picker_parent, picker_title):
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.grid_columnconfigure(0, weight=1)
+
+        entry = ctk.CTkEntry(container)
+        entry.insert(0, initial_value)
+        entry.grid(row=0, column=0, sticky="ew")
+
+        pick_button = ctk.CTkButton(
+            container,
+            text="Pick",
+            width=72,
+            command=lambda: open_date_picker(picker_parent, entry, title=picker_title),
+        )
+        pick_button.grid(row=0, column=1, padx=(8, 0))
+
+        self._add_field(parent, row_index, label_text, container)
         return entry
 
     def _add_field(self, parent, row_index, label_text, widget):

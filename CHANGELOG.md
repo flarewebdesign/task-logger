@@ -10,6 +10,7 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 - Contributor task automation:
   - `Makefile` targets for install/check/run/smoke.
   - `scripts/tasks.ps1` for Windows setup/check/run/smoke commands.
+- Calendar date picker support in add/edit flows while preserving manual `YYYY-MM-DD` entry.
 
 ## [0.3.0] - 2026-02-14
 
