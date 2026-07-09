@@ -5,6 +5,7 @@
 ![Excel persistence](https://img.shields.io/badge/Storage-Excel-217346?logo=microsoftexcel&logoColor=white)
 ![Google Calendar optional](https://img.shields.io/badge/Google%20Calendar-optional-4285F4?logo=googlecalendar&logoColor=white)
 ![Dashboard API optional](https://img.shields.io/badge/Dashboard%20API-optional-0F172A)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Local-first Python desktop time tracker for client work, billable hours, categories, and optional sync targets.
 
@@ -407,3 +408,7 @@ For reporting security issues, see `SECURITY.md`.
 ## Contributing
 
 See `CONTRIBUTING.md` for setup, standards, and pull request expectations.
+
+## License
+
+Task Logger is released under the [MIT License](LICENSE).
