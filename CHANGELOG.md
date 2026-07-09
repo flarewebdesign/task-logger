@@ -11,6 +11,11 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
   - `Makefile` targets for install/check/run/smoke.
   - `scripts/tasks.ps1` for Windows setup/check/run/smoke commands.
 - Calendar date picker support in add/edit flows while preserving manual `YYYY-MM-DD` entry.
+- Configurable task categories in add/edit flows and the task table.
+- Configurable task clients in add/edit flows, the task table, and dashboard sync payloads.
+- Billable/no-charge tracking in local task logs, add/edit forms, task lists, and dashboard payloads.
+- Dashboard client loading from the token-authenticated `/api/clients` endpoint.
+- Optional token-authenticated dashboard API sync for add/edit/delete.
 
 ## [0.3.0] - 2026-02-14
 

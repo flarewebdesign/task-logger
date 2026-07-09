@@ -3,6 +3,9 @@
 from datetime import datetime, timedelta
 import json
 import os
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 from typing import Iterable
 
@@ -23,6 +26,8 @@ except ImportError:
 TASK_COLUMNS = [
     "ID",
     "Task",
+    "Client",
+    "Category",
     "Start Date",
     "Start Time",
     "Start AM/PM",
@@ -31,14 +36,47 @@ TASK_COLUMNS = [
     "End AM/PM",
     "Timezone",
     "Decimal Hours",
+    "Billable",
     "Event ID",
+    "Dashboard Entry ID",
     "Attendees",
 ]
+
+DEFAULT_CLIENT = "Unassigned"
+DEFAULT_CATEGORY = "Uncategorized"
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/calendar.events",
 ]
+
+
+def _normalize_billable(value, default=True):
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+
+    normalized = str(value).strip().lower()
+    if normalized in {"0", "false", "no", "n", "non-billable", "non billable", "no charge", "not billable"}:
+        return False
+    if normalized in {"1", "true", "yes", "y", "billable", "billed"}:
+        return True
+
+    return default
+
+
+def is_billable(value, default=True):
+    return _normalize_billable(value, default=default)
 
 
 def _harden_file_permissions(file_path):
@@ -64,7 +102,7 @@ def load_task_log(task_log="task_log.xlsx"):
         return df
 
     if list(df.columns) != TASK_COLUMNS:
-        repaired = pd.DataFrame(columns=TASK_COLUMNS)
+        repaired = pd.DataFrame(index=df.index, columns=TASK_COLUMNS)
         for column in TASK_COLUMNS:
             if column in df.columns:
                 repaired[column] = df[column]
@@ -75,7 +113,20 @@ def load_task_log(task_log="task_log.xlsx"):
 
 
 def save_task_log(df, task_log="task_log.xlsx"):
-    df.to_excel(task_log, index=False)
+    output = df.copy()
+    for column in TASK_COLUMNS:
+        if column not in output.columns:
+            output[column] = None
+
+    output = output[TASK_COLUMNS]
+    if "Client" in output.columns:
+        output["Client"] = output["Client"].apply(_normalize_client)
+    if "Category" in output.columns:
+        output["Category"] = output["Category"].apply(_normalize_category)
+    if "Billable" in output.columns:
+        output["Billable"] = output["Billable"].apply(_normalize_billable)
+
+    output.to_excel(task_log, index=False)
 
 
 def _parse_time_input(time_value):
@@ -166,6 +217,26 @@ def _normalize_attendees(attendees):
         seen.add(key)
         cleaned.append(normalized)
     return cleaned
+
+
+def _normalize_category(category):
+    try:
+        if pd.isna(category):
+            return DEFAULT_CATEGORY
+    except (TypeError, ValueError):
+        pass
+    normalized = str(category or "").strip()
+    return normalized if normalized and normalized.lower() != "nan" else DEFAULT_CATEGORY
+
+
+def _normalize_client(client):
+    try:
+        if pd.isna(client):
+            return DEFAULT_CLIENT
+    except (TypeError, ValueError):
+        pass
+    normalized = str(client or "").strip()
+    return normalized if normalized and normalized.lower() != "nan" else DEFAULT_CLIENT
 
 
 def _safe_cell(value):
@@ -264,6 +335,115 @@ def remove_event_from_calendar(
     service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
 
 
+def _dashboard_request(api_url, api_token, method, path, payload=None, timeout=10):
+    if not api_url:
+        raise ValueError("Dashboard API URL is required when dashboard sync is enabled.")
+    if not api_token:
+        raise ValueError("Dashboard API token is required when dashboard sync is enabled.")
+
+    endpoint = f"{api_url.rstrip('/')}{path}"
+    data = None
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Accept": "application/json",
+    }
+
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    request = urllib.request.Request(endpoint, data=data, headers=headers, method=method)
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Dashboard API returned {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Dashboard API request failed: {exc.reason}") from exc
+
+    if not body:
+        return {}
+
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Dashboard API returned invalid JSON.") from exc
+
+
+def fetch_dashboard_clients(api_url, api_token, timeout=10):
+    response = _dashboard_request(
+        api_url=api_url,
+        api_token=api_token,
+        method="GET",
+        path="/api/clients",
+        timeout=timeout,
+    )
+    clients = response.get("clients", [])
+    names = []
+    seen = set()
+    for client in clients:
+        if isinstance(client, dict):
+            name = _normalize_client(client.get("name"))
+        else:
+            name = _normalize_client(client)
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def sync_task_to_dashboard(
+    task_id,
+    task_name,
+    client,
+    category,
+    billable,
+    start_datetime,
+    end_datetime,
+    timezone,
+    hours_worked,
+    api_url,
+    api_token,
+    timeout=10,
+):
+    payload = {
+        "external_id": str(task_id),
+        "task": task_name,
+        "client": _normalize_client(client),
+        "category": _normalize_category(category),
+        "start": start_datetime.isoformat(),
+        "end": end_datetime.isoformat(),
+        "timezone": timezone,
+        "decimal_hours": hours_worked,
+        "billable": _normalize_billable(billable),
+        "source": "task-logger",
+    }
+    response = _dashboard_request(
+        api_url=api_url,
+        api_token=api_token,
+        method="POST",
+        path="/api/time-entries",
+        payload=payload,
+        timeout=timeout,
+    )
+    return _safe_cell(response.get("entry", {}).get("id"))
+
+
+def remove_task_from_dashboard(task_id, api_url, api_token, timeout=10):
+    encoded_id = urllib.parse.quote(str(task_id), safe="")
+    _dashboard_request(
+        api_url=api_url,
+        api_token=api_token,
+        method="DELETE",
+        path=f"/api/time-entries/{encoded_id}",
+        timeout=timeout,
+    )
+
+
 def add_task_to_log(
     task_name,
     start_date,
@@ -279,11 +459,20 @@ def add_task_to_log(
     credentials_path="credentials.json",
     token_path="token.json",
     calendar_id="primary",
+    client=DEFAULT_CLIENT,
+    category=DEFAULT_CATEGORY,
+    billable=True,
+    sync_to_dashboard=False,
+    dashboard_api_url="",
+    dashboard_api_token="",
 ):
     task_name = task_name.strip()
     if not task_name:
         raise ValueError("Task name is required.")
 
+    category = _normalize_category(category)
+    client = _normalize_client(client)
+    billable = _normalize_billable(billable)
     start_period = start_period.strip().upper()
     end_period = end_period.strip().upper()
     start_time = normalize_12hour_time(start_time)
@@ -302,7 +491,9 @@ def add_task_to_log(
 
     task_id = str(uuid.uuid4())
     event_id = ""
+    dashboard_entry_id = ""
     calendar_error = ""
+    dashboard_error = ""
 
     if sync_to_google:
         try:
@@ -320,12 +511,32 @@ def add_task_to_log(
         except Exception as exc:
             calendar_error = str(exc)
 
+    if sync_to_dashboard:
+        try:
+            dashboard_entry_id = sync_task_to_dashboard(
+                task_id=task_id,
+                task_name=task_name,
+                client=client,
+                category=category,
+                billable=billable,
+                start_datetime=start_datetime,
+                end_datetime=end_datetime,
+                timezone=timezone,
+                hours_worked=hours_worked,
+                api_url=dashboard_api_url,
+                api_token=dashboard_api_token,
+            )
+        except Exception as exc:
+            dashboard_error = str(exc)
+
     df = load_task_log(task_log)
     new_row = pd.DataFrame(
         [
             {
                 "ID": task_id,
                 "Task": task_name,
+                "Client": client,
+                "Category": category,
                 "Start Date": start_date,
                 "Start Time": start_time,
                 "Start AM/PM": start_period,
@@ -334,20 +545,26 @@ def add_task_to_log(
                 "End AM/PM": end_period,
                 "Timezone": timezone,
                 "Decimal Hours": hours_worked,
+                "Billable": billable,
                 "Event ID": event_id,
+                "Dashboard Entry ID": dashboard_entry_id,
                 "Attendees": ",".join(attendees_list),
             }
         ]
     )
-    df = pd.concat([df, new_row], ignore_index=True)
+    df = new_row if df.empty else pd.concat([df, new_row], ignore_index=True)
     save_task_log(df, task_log)
 
     return {
         "task_id": task_id,
         "event_id": event_id,
+        "dashboard_entry_id": dashboard_entry_id,
         "hours_worked": hours_worked,
+        "billable": billable,
         "calendar_synced": bool(event_id),
         "calendar_error": calendar_error,
+        "dashboard_synced": bool(dashboard_entry_id) and sync_to_dashboard,
+        "dashboard_error": dashboard_error,
     }
 
 
@@ -367,6 +584,12 @@ def update_task_in_log(
     credentials_path="credentials.json",
     token_path="token.json",
     calendar_id="primary",
+    client=None,
+    category=None,
+    billable=None,
+    sync_to_dashboard=False,
+    dashboard_api_url="",
+    dashboard_api_token="",
 ):
     task_name = task_name.strip()
     if not task_name:
@@ -389,10 +612,17 @@ def update_task_in_log(
     )
 
     df = load_task_log(task_log)
+    df = df.astype("object")
     row_index = _get_task_row_index(df, task_id)
+    client = _normalize_client(client if client is not None else df.at[row_index, "Client"])
+    category = _normalize_category(category if category is not None else df.at[row_index, "Category"])
+    billable = _normalize_billable(billable if billable is not None else df.at[row_index, "Billable"])
     existing_event_id = _safe_cell(df.at[row_index, "Event ID"])
+    existing_dashboard_entry_id = _safe_cell(df.at[row_index, "Dashboard Entry ID"])
     new_event_id = existing_event_id
+    new_dashboard_entry_id = existing_dashboard_entry_id
     calendar_error = ""
+    dashboard_error = ""
 
     if sync_to_google:
         try:
@@ -420,10 +650,31 @@ def update_task_in_log(
         except Exception as exc:
             calendar_error = str(exc)
 
+    if sync_to_dashboard:
+        try:
+            synced_dashboard_entry_id = sync_task_to_dashboard(
+                task_id=task_id,
+                task_name=task_name,
+                client=client,
+                category=category,
+                billable=billable,
+                start_datetime=start_datetime,
+                end_datetime=end_datetime,
+                timezone=timezone,
+                hours_worked=hours_worked,
+                api_url=dashboard_api_url,
+                api_token=dashboard_api_token,
+            )
+            new_dashboard_entry_id = synced_dashboard_entry_id or existing_dashboard_entry_id
+        except Exception as exc:
+            dashboard_error = str(exc)
+
     df.loc[
         row_index,
         [
             "Task",
+            "Client",
+            "Category",
             "Start Date",
             "Start Time",
             "Start AM/PM",
@@ -432,11 +683,15 @@ def update_task_in_log(
             "End AM/PM",
             "Timezone",
             "Decimal Hours",
+            "Billable",
             "Event ID",
+            "Dashboard Entry ID",
             "Attendees",
         ],
     ] = [
         task_name,
+        client,
+        category,
         start_date,
         start_time,
         start_period,
@@ -445,7 +700,9 @@ def update_task_in_log(
         end_period,
         timezone,
         hours_worked,
+        billable,
         new_event_id,
+        new_dashboard_entry_id,
         ",".join(attendees_list),
     ]
     save_task_log(df, task_log)
@@ -453,9 +710,13 @@ def update_task_in_log(
     return {
         "task_id": str(task_id),
         "event_id": new_event_id,
+        "dashboard_entry_id": new_dashboard_entry_id,
         "hours_worked": hours_worked,
+        "billable": billable,
         "calendar_synced": bool(new_event_id) and sync_to_google,
         "calendar_error": calendar_error,
+        "dashboard_synced": bool(new_dashboard_entry_id) and sync_to_dashboard,
+        "dashboard_error": dashboard_error,
     }
 
 
@@ -466,11 +727,16 @@ def remove_task_from_log(
     credentials_path="credentials.json",
     token_path="token.json",
     calendar_id="primary",
+    sync_to_dashboard=False,
+    dashboard_api_url="",
+    dashboard_api_token="",
 ):
     df = load_task_log(task_log)
     row_index = _get_task_row_index(df, task_id)
     event_id = _safe_cell(df.at[row_index, "Event ID"])
+    dashboard_entry_id = _safe_cell(df.at[row_index, "Dashboard Entry ID"])
     calendar_error = ""
+    dashboard_error = ""
 
     if sync_to_google and event_id:
         try:
@@ -483,13 +749,25 @@ def remove_task_from_log(
         except Exception as exc:
             calendar_error = str(exc)
 
+    if sync_to_dashboard:
+        try:
+            remove_task_from_dashboard(
+                task_id=task_id,
+                api_url=dashboard_api_url,
+                api_token=dashboard_api_token,
+            )
+        except Exception as exc:
+            dashboard_error = str(exc)
+
     df = df.drop(row_index).reset_index(drop=True)
     save_task_log(df, task_log)
 
     return {
         "task_id": str(task_id),
         "event_id": event_id,
+        "dashboard_entry_id": dashboard_entry_id,
         "calendar_error": calendar_error,
+        "dashboard_error": dashboard_error,
     }
 
 
@@ -499,6 +777,10 @@ def main():
 
     while True:
         task_name = input("Enter task name: ").strip()
+        client = input(f"Enter client (default {DEFAULT_CLIENT}): ").strip() or DEFAULT_CLIENT
+        category = input(f"Enter category (default {DEFAULT_CATEGORY}): ").strip() or DEFAULT_CATEGORY
+        billable_input = input("Billable? (Y/n): ").strip().lower()
+        billable = billable_input not in {"n", "no", "false", "0"}
         start_date = input("Enter start date (YYYY-MM-DD): ").strip()
         start_time = input("Enter start time (HH:MM): ").strip()
         start_period = input("Enter start time period (AM/PM): ").strip().upper()
@@ -511,6 +793,9 @@ def main():
         attendees = attendees_input.split(",") if attendees_input else []
         result = add_task_to_log(
             task_name=task_name,
+            client=client,
+            category=category,
+            billable=billable,
             start_date=start_date,
             start_time=start_time,
             start_period=start_period,

@@ -1,121 +1,100 @@
 # Task Logger
 
-Task Logger is a desktop time-tracking application for service work and billing. It lets you log tasks, calculates decimal hours, stores records in Excel, and optionally syncs events to Google Calendar.
+Python 3.9+ | Local-first desktop app | Excel persistence | Optional Google Calendar sync | Optional dashboard API sync
 
-The app is local-first: task logging works with no Google setup.
+Local-first Python desktop time tracker for client work, billable hours, categories, and optional sync targets.
 
-## Highlights
+Task Logger is built so the public repository is useful without any private infrastructure. It works as a standalone desktop app that stores settings in `config.json` and tasks in `task_log.xlsx`. If you have your own dashboard, you can opt into token-authenticated API sync without making the dashboard required for local users.
 
-- Single-window UI with tabs: `Log Task`, `Task List`, and `Settings`
-- Fast task capture with timezone-aware hour calculations
-- Date input supports both manual typing (`YYYY-MM-DD`) and calendar picking
-- Edit and delete workflows from a table view
-- Local Excel persistence in `task_log.xlsx`
-- Optional Google Calendar sync (opt-in, configurable)
-- Graceful fallback: local saves continue even if Google sync fails
+## What It Does
 
-## Table of Contents
+- Logs client work with task name, client, category, date, time, timezone, attendees, and billable state.
+- Calculates decimal hours from timezone-aware start and end times.
+- Stores all task records locally in `task_log.xlsx`.
+- Stores local preferences, clients, categories, and optional sync settings in `config.json`.
+- Supports editing and deleting existing tasks from the desktop table.
+- Optionally syncs tasks to Google Calendar.
+- Optionally upserts and deletes time entries through a private dashboard API.
+- Optionally imports dashboard client names into the local client list.
 
-- [Architecture](#architecture)
-- [Requirements](#requirements)
-- [Quick Start](#quick-start)
-- [Google Calendar (Optional)](#google-calendar-optional)
-- [Configuration](#configuration)
-- [Data Model](#data-model)
-- [Project Structure](#project-structure)
-- [Development](#development)
-- [Task Automation](#task-automation)
-- [Release Management](#release-management)
-- [Troubleshooting](#troubleshooting)
-- [Security Notes](#security-notes)
+## Local-First Model
 
-## Architecture
+The desktop app does not require Google, a dashboard, Neon, Vercel, or any hosted service.
 
-The codebase is intentionally small and split by responsibility:
+Runtime files:
 
-- `taskLoggerGUI.py`
-  - Main application window and tab layout
-  - Form validation, settings management, and status feedback
-- `taskListGUI.py`
-  - Embedded task list panel (table, edit, delete interactions)
-- `taskLogger.py`
-  - Core domain logic: parsing, validation, hour calculation
-  - Excel read/write operations
-  - Optional Google Calendar API integration
+- `config.json`: local settings created by the app when it first runs.
+- `task_log.xlsx`: local task database created by the app when it first runs.
+- Google token and credential files: only used if Google Calendar sync is enabled.
 
-## Requirements
+These files are intentionally ignored by Git because they can contain private client, billing, and credential data.
 
-- Python 3.9+
-- Windows, macOS, or Linux with a desktop environment
+## Where Local Clients Come From
 
-Core dependencies:
+Local clients are loaded from the `clients` array in `config.json`.
 
-- `pandas`
-- `openpyxl`
-- `customtkinter`
-- `pytz`
+Startup behavior:
 
-Optional Google sync dependencies:
+1. `taskLoggerGUI.py` calls `load_config()`.
+2. If `config.json` does not exist, the app creates it from `DEFAULT_CONFIG`.
+3. The default client list is `["Unassigned"]`.
+4. The Log Task and Edit Task client dropdowns read from `config["clients"]`.
+5. Saving Settings normalizes the comma-separated Clients field and writes it back to `config.json`.
 
-- `google-auth`
-- `google-auth-oauthlib`
-- `google-auth-httplib2`
-- `google-api-python-client`
+Dashboard import is optional:
+
+- `Import From Dashboard` calls `GET /api/clients`.
+- The returned names are copied into the same local `config.json` `clients` array.
+- Importing clients does not enable task sync by itself.
+- If dashboard sync is disabled, the app still uses the local client list normally.
+
+Example local client config:
+
+```json
+{
+  "clients": ["Unassigned", "Acme Studio", "Northwind"],
+  "categories": ["Development", "Design", "Admin", "Support", "Meetings"]
+}
+```
 
 ## Quick Start
 
-1. Clone the repository:
+Clone the repository:
 
 ```bash
 git clone https://github.com/flarewebdesign/task-logger.git
 cd task-logger
 ```
 
-2. Create and activate a virtual environment:
+Create and activate a virtual environment:
 
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
+```
+
+Windows:
+
+```powershell
+.\.venv\Scripts\activate
+```
+
+macOS/Linux:
+
+```bash
 source .venv/bin/activate
 ```
 
-3. Install core dependencies:
+Install the local-only dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Run the desktop app:
+Run the app:
 
 ```bash
 python taskLoggerGUI.py
 ```
-
-## Google Calendar (Optional)
-
-Google sync is disabled by default. Enable it only if needed.
-
-1. Install Google dependencies:
-
-```bash
-pip install -r requirements-google.txt
-```
-
-2. Create OAuth client credentials from Google Cloud and download `credentials.json`.
-3. Open the app and go to `Settings`.
-4. Enable `Google Calendar Sync`.
-5. Set:
-   - `Credentials File` (path to your OAuth JSON)
-   - `Token Storage File` (local token path)
-   - `Calendar ID` (default: `primary`)
-6. Click `Connect Google` and finish authorization.
-
-Notes:
-
-- If sync fails during add/edit/delete, local task data is still saved.
-- Token files are local and never uploaded by the app.
 
 ## Configuration
 
@@ -126,50 +105,192 @@ Example:
 ```json
 {
   "timezone": "UTC",
+  "categories": ["Development", "Design", "Admin", "Support", "Meetings"],
+  "clients": ["Unassigned", "Acme Studio"],
   "google_sync_enabled": false,
   "google_credentials_path": "credentials.json",
   "google_token_path": "C:/Users/<you>/.task_logger/token.json",
-  "google_calendar_id": "primary"
+  "google_calendar_id": "primary",
+  "dashboard_sync_enabled": false,
+  "dashboard_api_url": "http://localhost:3000",
+  "dashboard_api_token": ""
 }
 ```
 
-Key settings:
+Settings:
 
-- `timezone`: default timezone for new tasks
-- `google_sync_enabled`: enables calendar sync calls
-- `google_credentials_path`: OAuth client JSON path
-- `google_token_path`: OAuth token output path
-- `google_calendar_id`: Google Calendar target ID
+- `timezone`: default timezone for new tasks.
+- `categories`: category choices used by add/edit forms.
+- `clients`: client choices used by add/edit forms.
+- `google_sync_enabled`: enables Google Calendar sync calls.
+- `google_credentials_path`: OAuth client JSON path.
+- `google_token_path`: OAuth token output path.
+- `google_calendar_id`: Google Calendar target ID.
+- `dashboard_sync_enabled`: enables dashboard API sync calls.
+- `dashboard_api_url`: private dashboard base URL.
+- `dashboard_api_token`: dashboard bearer token.
+
+## Google Calendar Sync
+
+Google Calendar sync is disabled by default.
+
+Install the optional Google dependencies:
+
+```bash
+pip install -r requirements-google.txt
+```
+
+Setup:
+
+1. Create OAuth client credentials in Google Cloud.
+2. Download the OAuth JSON file.
+3. Open Task Logger and go to `Settings`.
+4. Enable `Google Calendar Sync`.
+5. Set `Credentials File`, `Token Storage File`, and `Calendar ID`.
+6. Click `Connect Google` and complete browser authorization.
+
+If Calendar sync fails during add, edit, or delete, the local Excel task still saves and the app shows a warning.
+
+## Dashboard API Sync
+
+Dashboard sync is disabled by default. Enable it only when you have a compatible private API.
+
+Settings required for sync:
+
+- `Enable Dashboard Sync`
+- `Dashboard URL`
+- `Dashboard API Token`
+
+The desktop app sends:
+
+```text
+Authorization: Bearer <dashboard token>
+Accept: application/json
+Content-Type: application/json
+```
+
+### Import Clients
+
+Used only when the user clicks `Import From Dashboard`.
+
+```text
+GET /api/clients
+```
+
+Accepted response shapes:
+
+```json
+{
+  "clients": ["Acme Studio", "Northwind"]
+}
+```
+
+```json
+{
+  "clients": [
+    { "name": "Acme Studio" },
+    { "name": "Northwind" }
+  ]
+}
+```
+
+The imported names replace the local Clients field and are saved to `config.json`.
+
+### Upsert Time Entry
+
+Called when adding or editing a task while dashboard sync is enabled.
+
+```text
+POST /api/time-entries
+```
+
+Payload:
+
+```json
+{
+  "external_id": "task UUID from desktop",
+  "task": "Client work",
+  "client": "Acme Studio",
+  "category": "Development",
+  "start": "2026-07-07T09:00:00+00:00",
+  "end": "2026-07-07T10:30:00+00:00",
+  "timezone": "UTC",
+  "decimal_hours": 1.5,
+  "billable": true,
+  "source": "task-logger"
+}
+```
+
+Expected response:
+
+```json
+{
+  "entry": {
+    "id": "dashboard-entry-id"
+  }
+}
+```
+
+Recommended dashboard behavior:
+
+- Validate the bearer token.
+- Upsert by `external_id` so repeated desktop syncs update the same row.
+- Store `external_id` separately from the dashboard database ID.
+- Treat missing `billable` as `true` for compatibility with older desktop clients.
+- Return the dashboard entry ID in `entry.id`.
+
+### Delete Time Entry
+
+Called when deleting a local task while dashboard sync is enabled.
+
+```text
+DELETE /api/time-entries/{external_id_or_id}
+```
+
+The current desktop app sends the local task UUID, so the dashboard should delete by either `external_id` or native dashboard `id`.
+
+Valid responses:
+
+- `204 No Content`
+- `200 OK` with an empty or JSON body
+
+### Failure Behavior
+
+Task Logger is local-first. If a dashboard request fails:
+
+- The local add, edit, or delete still completes.
+- The app shows a warning with the sync error.
+- The user can fix settings and retry with a future edit/save.
 
 ## Data Model
 
-Task records are stored in `task_log.xlsx` with these columns:
+Task records are stored in `task_log.xlsx`.
 
-- `ID`: UUID for each task
-- `Task`: task title
-- `Start Date`: `YYYY-MM-DD`
-- `Start Time`: `HH:MM` (12-hour input)
-- `Start AM/PM`: `AM` or `PM`
-- `End Date`: `YYYY-MM-DD`
-- `End Time`: `HH:MM` (12-hour input)
-- `End AM/PM`: `AM` or `PM`
-- `Timezone`: IANA timezone string (for example `America/Detroit`)
-- `Decimal Hours`: computed duration
-- `Event ID`: Google event ID when synced
-- `Attendees`: comma-separated email list
+| Column | Description |
+| --- | --- |
+| `ID` | Local UUID for each task. |
+| `Task` | Task title. |
+| `Client` | Client name from local config. |
+| `Category` | Work category from local config. |
+| `Start Date` | Start date in `YYYY-MM-DD` format. |
+| `Start Time` | Start time in 12-hour `HH:MM` format. |
+| `Start AM/PM` | `AM` or `PM`. |
+| `End Date` | End date in `YYYY-MM-DD` format. |
+| `End Time` | End time in 12-hour `HH:MM` format. |
+| `End AM/PM` | `AM` or `PM`. |
+| `Timezone` | IANA timezone string, such as `America/New_York`. |
+| `Decimal Hours` | Computed duration. |
+| `Billable` | `true` for billable work, `false` for no-charge work. |
+| `Event ID` | Google Calendar event ID when synced. |
+| `Dashboard Entry ID` | Dashboard entry ID returned by the API when synced. |
+| `Attendees` | Comma-separated attendee emails. |
+
+Older task logs are repaired automatically when loaded. Missing `Client`, `Category`, `Billable`, or sync columns are added with safe defaults.
 
 ## Project Structure
 
 ```text
 task-logger/
-  .github/
-    workflows/
-      ci.yml
-    ISSUE_TEMPLATE/
-      bug_report.yml
-      feature_request.yml
-      config.yml
-    pull_request_template.md
   README.md
   CHANGELOG.md
   CONTRIBUTING.md
@@ -179,55 +300,42 @@ task-logger/
   requirements-google.txt
   scripts/
     tasks.ps1
+  taskLogger.py
   taskLoggerGUI.py
   taskListGUI.py
-  taskLogger.py
-  config.json            # generated at runtime
-  task_log.xlsx          # generated at runtime
+  ui_date_picker.py
+  config.json            # generated locally, ignored by Git
+  task_log.xlsx          # generated locally, ignored by Git
 ```
+
+Core modules:
+
+- `taskLogger.py`: validation, time calculation, Excel persistence, Google sync, and dashboard API calls.
+- `taskLoggerGUI.py`: main desktop window, form validation, settings, and add-task flow.
+- `taskListGUI.py`: task table, edit flow, delete flow, and sync cleanup warnings.
+- `ui_date_picker.py`: date picker UI helper.
 
 ## Development
 
-1. Create a virtual environment and install dependencies:
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. For Google integration development, install optional dependencies:
+Run syntax checks:
 
 ```bash
-pip install -r requirements-google.txt
+python -m py_compile taskLogger.py taskListGUI.py taskLoggerGUI.py ui_date_picker.py
 ```
 
-3. Run the app from source:
+Run the local-only backend smoke test:
 
 ```bash
-python taskLoggerGUI.py
-```
-
-4. Validate syntax before commits:
-
-```bash
-python -m py_compile taskLogger.py taskListGUI.py taskLoggerGUI.py
-```
-
-5. CI runs the same compile checks and a local-only backend smoke test on pull requests and pushes to `main`.
-
-## Task Automation
-
-Contributor shortcuts are available for both Unix-like and Windows environments.
-
-Makefile targets:
-
-```bash
-make install
-make check
 make smoke
-make run
 ```
 
-PowerShell task runner:
+Windows task shortcuts:
 
 ```powershell
 .\scripts\tasks.ps1 setup
@@ -236,41 +344,59 @@ PowerShell task runner:
 .\scripts\tasks.ps1 run
 ```
 
-For Google-enabled environments:
+## Public Repo Safety
 
-```bash
-make install-google
-```
+This repository is intended to stay public. Keep private runtime files out of source control.
 
-```powershell
-.\scripts\tasks.ps1 setup-google
-```
+Do not commit:
 
-## Release Management
+- `config.json`
+- `task_log.xlsx`
+- `.env` files
+- Google OAuth credentials
+- Google token files
+- Dashboard API tokens
 
-- Release notes are tracked in `CHANGELOG.md`.
-- Use the `Unreleased` section during active development.
-- Create a versioned section when preparing a release.
+The existing `.gitignore` excludes the local runtime files used by the app. Review it before adding new generated files or deployment-specific credentials.
 
 ## Troubleshooting
 
-- `ModuleNotFoundError: pandas` (or similar):
-  - Install missing dependencies in your active environment.
-- `Google Calendar dependencies are not installed`:
-  - Install the optional Google packages listed above.
-- `Google credentials file not found`:
-  - Verify `Credentials File` path in `Settings`.
-- `Dates must use YYYY-MM-DD format` or time validation errors:
-  - Use the exact input format shown in the form labels.
-- Calendar failures while saving:
-  - Data is still stored locally; inspect the warning message and retry after fixing Google auth/config.
+`ModuleNotFoundError: pandas` or similar:
 
-## Security Notes
+Install dependencies in the active environment.
 
-- Credentials and tokens are file-based and local to the machine.
-- Keep OAuth credential and token files out of version control.
-- Use a dedicated Google account/project for production usage.
-- Review and rotate credentials if you suspect leakage.
+```bash
+pip install -r requirements.txt
+```
+
+Google Calendar dependencies are not installed:
+
+```bash
+pip install -r requirements-google.txt
+```
+
+Dashboard client import fails:
+
+- Confirm the dashboard is running.
+- Confirm `Dashboard URL` points to the API base URL.
+- Confirm `Dashboard API Token` matches the server-side bearer token.
+- Confirm `GET /api/clients` returns one of the supported response shapes.
+
+Dashboard task sync fails:
+
+- Confirm `POST /api/time-entries` accepts the documented payload.
+- Confirm `DELETE /api/time-entries/{id}` supports lookup by `external_id`.
+- Inspect the warning text shown by the desktop app.
+
+Date or time validation errors:
+
+- Dates must use `YYYY-MM-DD`.
+- Times must use 12-hour `HH:MM`.
+- Start/end periods must be `AM` or `PM`.
+
+## Security
+
+Task logs and client names can be sensitive billing data. Protect `task_log.xlsx` and `config.json` according to your local security requirements.
 
 For reporting security issues, see `SECURITY.md`.
 

@@ -19,6 +19,8 @@ CONFIG_FILE = "config.json"
 TASK_LOG_FILE = "task_log.xlsx"
 COMMON_TIMEZONES = pytz.common_timezones
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DEFAULT_CATEGORIES = ["Development", "Design", "Admin", "Support", "Meetings"]
+DEFAULT_CLIENTS = [taskLogger.DEFAULT_CLIENT]
 
 
 def _default_token_path():
@@ -27,10 +29,15 @@ def _default_token_path():
 
 DEFAULT_CONFIG = {
     "timezone": "UTC",
+    "categories": DEFAULT_CATEGORIES,
+    "clients": DEFAULT_CLIENTS,
     "google_sync_enabled": False,
     "google_credentials_path": "credentials.json",
     "google_token_path": _default_token_path(),
     "google_calendar_id": "primary",
+    "dashboard_sync_enabled": False,
+    "dashboard_api_url": "http://localhost:3000",
+    "dashboard_api_token": "",
 }
 
 
@@ -56,13 +63,18 @@ def load_config():
 
     if config["timezone"] not in pytz.all_timezones:
         config["timezone"] = "UTC"
+    config["categories"] = _normalize_categories(config.get("categories"))
+    config["clients"] = _normalize_clients(config.get("clients"))
     config["google_sync_enabled"] = bool(config["google_sync_enabled"])
+    config["dashboard_sync_enabled"] = bool(config["dashboard_sync_enabled"])
     if not str(config["google_token_path"]).strip():
         config["google_token_path"] = _default_token_path()
     if not str(config["google_calendar_id"]).strip():
         config["google_calendar_id"] = "primary"
     if not str(config["google_credentials_path"]).strip():
         config["google_credentials_path"] = "credentials.json"
+    if not str(config["dashboard_api_url"]).strip():
+        config["dashboard_api_url"] = "http://localhost:3000"
 
     return config
 
@@ -70,6 +82,52 @@ def load_config():
 def save_config(config):
     with open(CONFIG_FILE, "w", encoding="utf-8") as config_file:
         json.dump(config, config_file, indent=2)
+
+
+def _normalize_categories(value):
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    elif isinstance(value, list):
+        raw_values = value
+    else:
+        raw_values = DEFAULT_CATEGORIES
+
+    categories = []
+    seen = set()
+    for item in raw_values:
+        category = str(item).strip()
+        if not category:
+            continue
+        key = category.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        categories.append(category)
+
+    return categories or DEFAULT_CATEGORIES.copy()
+
+
+def _normalize_clients(value):
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    elif isinstance(value, list):
+        raw_values = value
+    else:
+        raw_values = DEFAULT_CLIENTS
+
+    clients = []
+    seen = set()
+    for item in raw_values:
+        client = str(item).strip()
+        if not client:
+            continue
+        key = client.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        clients.append(client)
+
+    return clients or DEFAULT_CLIENTS.copy()
 
 
 class TaskLoggerApp:
@@ -97,7 +155,7 @@ class TaskLoggerApp:
 
         subtitle = ctk.CTkLabel(
             header,
-            text="Track billable work, manage tasks, and optionally sync with Google Calendar.",
+            text="Track local time, billable state, clients, and optional sync targets.",
             text_color=("gray35", "gray70"),
         )
         subtitle.pack(anchor="w", pady=(4, 0))
@@ -133,6 +191,9 @@ class TaskLoggerApp:
         self.task_name_entry = ctk.CTkEntry(form, placeholder_text="Task name")
         self._place_field(form, 0, "Task Name", self.task_name_entry, column=0)
 
+        self.client_combobox = ctk.CTkComboBox(form, values=self._client_values())
+        self._place_field(form, 0, "Client", self.client_combobox, column=2)
+
         self.start_date_entry = self._create_date_field(
             parent=form,
             row=1,
@@ -167,15 +228,28 @@ class TaskLoggerApp:
         self.attendees_entry = ctk.CTkEntry(form, placeholder_text="name@example.com, another@example.com")
         self._place_field(form, 4, "Attendees", self.attendees_entry, column=2)
 
+        self.category_combobox = ctk.CTkComboBox(form, values=self._category_values())
+        self._place_field(form, 5, "Category", self.category_combobox, column=0)
+
+        self.billable_var = tk.BooleanVar(value=True)
+        self.billable_checkbox = ctk.CTkCheckBox(
+            form,
+            text="Billable",
+            variable=self.billable_var,
+            onvalue=True,
+            offvalue=False,
+        )
+        self._place_field(form, 5, "Billing", self.billable_checkbox, column=2)
+
         hint = ctk.CTkLabel(
             form,
-            text="Tip: Use 12-hour time (HH:MM) with AM/PM. Calendar sync is optional in Settings.",
+            text="Tip: Use 12-hour time (HH:MM) with AM/PM. Calendar and dashboard sync are optional in Settings.",
             text_color=("gray35", "gray70"),
         )
-        hint.grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        hint.grid(row=6, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
         button_row = ctk.CTkFrame(form, fg_color="transparent")
-        button_row.grid(row=6, column=0, columnspan=4, sticky="w", pady=(16, 0))
+        button_row.grid(row=7, column=0, columnspan=4, sticky="w", pady=(16, 0))
 
         self.add_task_button = ctk.CTkButton(
             button_row,
@@ -208,13 +282,40 @@ class TaskLoggerApp:
         self.task_list_panel.pack(fill="both", expand=True)
 
     def _build_settings_tab(self):
-        settings = ctk.CTkFrame(self.settings_tab)
+        settings = ctk.CTkScrollableFrame(self.settings_tab)
         settings.pack(fill="both", expand=True, padx=12, pady=12)
         settings.grid_columnconfigure(1, weight=1)
 
         self.default_timezone_combo = ctk.CTkComboBox(settings, values=COMMON_TIMEZONES)
         self.default_timezone_combo.set(self.config["timezone"])
         self._place_settings_field(settings, 0, "Default Timezone", self.default_timezone_combo)
+
+        self.categories_entry = ctk.CTkEntry(settings)
+        self.categories_entry.insert(0, ", ".join(self.config["categories"]))
+        self._place_settings_field(settings, 1, "Categories", self.categories_entry)
+
+        clients_row = ctk.CTkFrame(settings, fg_color="transparent")
+        clients_row.grid(row=2, column=1, sticky="ew", pady=(0, 10))
+        clients_row.grid_columnconfigure(0, weight=1)
+        self.clients_entry = ctk.CTkEntry(clients_row)
+        self.clients_entry.insert(0, ", ".join(self.config["clients"]))
+        self.clients_entry.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        load_clients_button = ctk.CTkButton(
+            clients_row,
+            text="Import From Dashboard",
+            width=160,
+            command=self._load_clients_from_dashboard,
+        )
+        load_clients_button.grid(row=0, column=1)
+        clients_note = ctk.CTkLabel(
+            clients_row,
+            text="Local clients are used by default. Dashboard import only copies names into this list.",
+            text_color=("gray35", "gray70"),
+            justify="left",
+        )
+        clients_note.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        clients_label = ctk.CTkLabel(settings, text="Clients")
+        clients_label.grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(0, 10))
 
         self.google_sync_var = tk.BooleanVar(value=bool(self.config["google_sync_enabled"]))
         self.google_sync_switch = ctk.CTkSwitch(
@@ -224,10 +325,10 @@ class TaskLoggerApp:
             onvalue=True,
             offvalue=False,
         )
-        self.google_sync_switch.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 12))
+        self.google_sync_switch.grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 12))
 
         creds_row = ctk.CTkFrame(settings, fg_color="transparent")
-        creds_row.grid(row=2, column=1, sticky="ew", pady=(0, 10))
+        creds_row.grid(row=4, column=1, sticky="ew", pady=(0, 10))
         creds_row.grid_columnconfigure(0, weight=1)
         self.credentials_entry = ctk.CTkEntry(creds_row)
         self.credentials_entry.insert(0, self.config["google_credentials_path"])
@@ -235,10 +336,10 @@ class TaskLoggerApp:
         creds_browse = ctk.CTkButton(creds_row, text="Browse", width=90, command=self._browse_credentials)
         creds_browse.grid(row=0, column=1)
         creds_label = ctk.CTkLabel(settings, text="Credentials File")
-        creds_label.grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(0, 10))
+        creds_label.grid(row=4, column=0, sticky="w", padx=(0, 10), pady=(0, 10))
 
         token_row = ctk.CTkFrame(settings, fg_color="transparent")
-        token_row.grid(row=3, column=1, sticky="ew", pady=(0, 10))
+        token_row.grid(row=5, column=1, sticky="ew", pady=(0, 10))
         token_row.grid_columnconfigure(0, weight=1)
         self.token_entry = ctk.CTkEntry(token_row)
         self.token_entry.insert(0, self.config["google_token_path"])
@@ -246,26 +347,44 @@ class TaskLoggerApp:
         token_browse = ctk.CTkButton(token_row, text="Browse", width=90, command=self._browse_token)
         token_browse.grid(row=0, column=1)
         token_label = ctk.CTkLabel(settings, text="Token Storage File")
-        token_label.grid(row=3, column=0, sticky="w", padx=(0, 10), pady=(0, 10))
+        token_label.grid(row=5, column=0, sticky="w", padx=(0, 10), pady=(0, 10))
 
         self.calendar_id_entry = ctk.CTkEntry(settings)
         self.calendar_id_entry.insert(0, self.config["google_calendar_id"])
-        self._place_settings_field(settings, 4, "Calendar ID", self.calendar_id_entry)
+        self._place_settings_field(settings, 6, "Calendar ID", self.calendar_id_entry)
+
+        self.dashboard_sync_var = tk.BooleanVar(value=bool(self.config["dashboard_sync_enabled"]))
+        self.dashboard_sync_switch = ctk.CTkSwitch(
+            settings,
+            text="Enable Dashboard Sync",
+            variable=self.dashboard_sync_var,
+            onvalue=True,
+            offvalue=False,
+        )
+        self.dashboard_sync_switch.grid(row=7, column=0, columnspan=2, sticky="w", pady=(14, 12))
+
+        self.dashboard_url_entry = ctk.CTkEntry(settings)
+        self.dashboard_url_entry.insert(0, self.config["dashboard_api_url"])
+        self._place_settings_field(settings, 8, "Dashboard URL", self.dashboard_url_entry)
+
+        self.dashboard_token_entry = ctk.CTkEntry(settings, show="*")
+        self.dashboard_token_entry.insert(0, self.config["dashboard_api_token"])
+        self._place_settings_field(settings, 9, "Dashboard API Token", self.dashboard_token_entry)
 
         security_note = ctk.CTkLabel(
             settings,
             text=(
-                "Security note: credentials are read from the file you select. "
-                "OAuth tokens are stored locally in the token file above."
+                "Security note: credentials, OAuth tokens, and dashboard API tokens are stored locally. "
+                "Do not commit config.json or token files."
             ),
             text_color=("gray35", "gray70"),
             wraplength=760,
             justify="left",
         )
-        security_note.grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        security_note.grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         actions = ctk.CTkFrame(settings, fg_color="transparent")
-        actions.grid(row=6, column=0, columnspan=2, sticky="w", pady=(16, 0))
+        actions.grid(row=11, column=0, columnspan=2, sticky="w", pady=(16, 0))
 
         save_button = ctk.CTkButton(actions, text="Save Settings", command=self._save_settings_clicked, width=130)
         save_button.pack(side="left", padx=(0, 10))
@@ -363,6 +482,9 @@ class TaskLoggerApp:
         attendees = self._parse_attendees(self.attendees_entry.get())
         return {
             "task_name": task_name,
+            "client": self.client_combobox.get().strip() or taskLogger.DEFAULT_CLIENT,
+            "category": self.category_combobox.get().strip() or taskLogger.DEFAULT_CATEGORY,
+            "billable": bool(self.billable_var.get()),
             "start_date": start_date,
             "start_time": start_time,
             "start_period": start_period,
@@ -381,6 +503,9 @@ class TaskLoggerApp:
 
             result = taskLogger.add_task_to_log(
                 task_name=data["task_name"],
+                client=data["client"],
+                category=data["category"],
+                billable=data["billable"],
                 start_date=data["start_date"],
                 start_time=data["start_time"],
                 start_period=data["start_period"],
@@ -394,17 +519,25 @@ class TaskLoggerApp:
                 credentials_path=runtime_config["google_credentials_path"],
                 token_path=runtime_config["google_token_path"],
                 calendar_id=runtime_config["google_calendar_id"],
+                sync_to_dashboard=runtime_config["dashboard_sync_enabled"],
+                dashboard_api_url=runtime_config["dashboard_api_url"],
+                dashboard_api_token=runtime_config["dashboard_api_token"],
             )
 
             self.task_list_panel.refresh()
             self.status_var.set(f"Saved task ({result['hours_worked']:.2f} hours).")
             self._clear_form()
 
+            sync_warnings = []
             if result.get("calendar_error"):
+                sync_warnings.append(f"Calendar sync failed:\n\n{result['calendar_error']}")
+            if result.get("dashboard_error"):
+                sync_warnings.append(f"Dashboard sync failed:\n\n{result['dashboard_error']}")
+            if sync_warnings:
                 messagebox.showwarning(
                     "Saved locally",
-                    "Task was saved locally, but calendar sync failed:\n\n"
-                    f"{result['calendar_error']}",
+                    "Task was saved locally, but one or more syncs failed:\n\n"
+                    + "\n\n".join(sync_warnings),
                 )
         except Exception as exc:
             self.status_var.set("Save failed.")
@@ -435,6 +568,11 @@ class TaskLoggerApp:
         self.end_period_menu.set(end_period)
 
         self.timezone_combobox.set(self.config["timezone"])
+        self.client_combobox.configure(values=self._client_values())
+        self.client_combobox.set(self._client_values()[0])
+        self.category_combobox.configure(values=self._category_values())
+        self.category_combobox.set(self._category_values()[0])
+        self.billable_var.set(True)
         self.attendees_entry.delete(0, "end")
         self.task_name_entry.focus()
 
@@ -446,20 +584,35 @@ class TaskLoggerApp:
         credentials_path = self.credentials_entry.get().strip()
         token_path = self.token_entry.get().strip()
         calendar_id = self.calendar_id_entry.get().strip() or "primary"
+        categories = _normalize_categories(self.categories_entry.get())
+        clients = _normalize_clients(self.clients_entry.get())
+        dashboard_api_url = self.dashboard_url_entry.get().strip()
+        dashboard_api_token = self.dashboard_token_entry.get().strip()
 
         if self.google_sync_var.get() and not credentials_path:
             raise ValueError("Credentials file is required when Google sync is enabled.")
         if not token_path:
             raise ValueError("Token storage file is required.")
+        if self.dashboard_sync_var.get() and not dashboard_api_url:
+            raise ValueError("Dashboard URL is required when dashboard sync is enabled.")
+        if self.dashboard_sync_var.get() and not dashboard_api_token:
+            raise ValueError("Dashboard API token is required when dashboard sync is enabled.")
 
         self.config["timezone"] = timezone
+        self.config["categories"] = categories
+        self.config["clients"] = clients
         self.config["google_sync_enabled"] = bool(self.google_sync_var.get())
         self.config["google_credentials_path"] = credentials_path
         self.config["google_token_path"] = token_path
         self.config["google_calendar_id"] = calendar_id
+        self.config["dashboard_sync_enabled"] = bool(self.dashboard_sync_var.get())
+        self.config["dashboard_api_url"] = dashboard_api_url
+        self.config["dashboard_api_token"] = dashboard_api_token
         save_config(self.config)
 
         self.timezone_combobox.set(timezone)
+        self.client_combobox.configure(values=self._client_values())
+        self.category_combobox.configure(values=self._category_values())
         self.status_var.set("Settings saved.")
 
     def _save_settings_clicked(self):
@@ -485,16 +638,62 @@ class TaskLoggerApp:
             self.status_var.set("Google connection failed.")
             messagebox.showerror("Connection failed", str(exc))
 
+    def _load_clients_from_dashboard(self):
+        try:
+            dashboard_api_url = self.dashboard_url_entry.get().strip()
+            dashboard_api_token = self.dashboard_token_entry.get().strip()
+
+            if not dashboard_api_url:
+                raise ValueError("Dashboard URL is required to load clients.")
+            if not dashboard_api_token:
+                raise ValueError("Dashboard API token is required to load clients.")
+
+            clients = taskLogger.fetch_dashboard_clients(
+                api_url=dashboard_api_url,
+                api_token=dashboard_api_token,
+            )
+            if not clients:
+                raise ValueError("Dashboard returned no clients. Your local client list was not changed.")
+            clients = _normalize_clients(clients)
+            self.clients_entry.delete(0, "end")
+            self.clients_entry.insert(0, ", ".join(clients))
+            self.config["clients"] = clients
+            self.config["dashboard_api_url"] = dashboard_api_url
+            self.config["dashboard_api_token"] = dashboard_api_token
+            save_config(self.config)
+            self.client_combobox.configure(values=self._client_values())
+            if self.client_combobox.get().strip() not in clients:
+                self.client_combobox.set(clients[0])
+            self.status_var.set(f"Imported {len(clients)} dashboard client(s) into the local list.")
+            messagebox.showinfo(
+                "Clients imported",
+                f"Imported {len(clients)} dashboard client(s). Dashboard task sync remains controlled by the sync toggle.",
+            )
+        except Exception as exc:
+            self.status_var.set("Client load failed.")
+            messagebox.showerror("Could not load clients", str(exc))
+
     def get_runtime_config(self):
         return {
             "google_sync_enabled": bool(self.config.get("google_sync_enabled", False)),
             "google_credentials_path": self.config.get("google_credentials_path", "credentials.json"),
             "google_token_path": self.config.get("google_token_path", _default_token_path()),
             "google_calendar_id": self.config.get("google_calendar_id", "primary") or "primary",
+            "dashboard_sync_enabled": bool(self.config.get("dashboard_sync_enabled", False)),
+            "dashboard_api_url": self.config.get("dashboard_api_url", "http://localhost:3000"),
+            "dashboard_api_token": self.config.get("dashboard_api_token", ""),
+            "categories": _normalize_categories(self.config.get("categories")),
+            "clients": _normalize_clients(self.config.get("clients")),
         }
 
     def _on_tasks_changed(self):
         self.status_var.set("Task list updated.")
+
+    def _category_values(self):
+        return _normalize_categories(self.config.get("categories"))
+
+    def _client_values(self):
+        return _normalize_clients(self.config.get("clients"))
 
     @staticmethod
     def _to_12_hour(dt_value):
