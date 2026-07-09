@@ -1,6 +1,10 @@
 # Task Logger
 
-Python 3.9+ | Local-first desktop app | Excel persistence | Optional Google Calendar sync | Optional dashboard API sync
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+![Local-first](https://img.shields.io/badge/Local--first-desktop-111827)
+![Excel persistence](https://img.shields.io/badge/Storage-Excel-217346?logo=microsoftexcel&logoColor=white)
+![Google Calendar optional](https://img.shields.io/badge/Google%20Calendar-optional-4285F4?logo=googlecalendar&logoColor=white)
+![Dashboard API optional](https://img.shields.io/badge/Dashboard%20API-optional-0F172A)
 
 Local-first Python desktop time tracker for client work, billable hours, categories, and optional sync targets.
 
