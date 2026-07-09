@@ -17,7 +17,8 @@ from ui_date_picker import open_date_picker
 
 CONFIG_FILE = "config.json"
 TASK_LOG_FILE = "task_log.xlsx"
-COMMON_TIMEZONES = pytz.common_timezones
+PINNED_TIMEZONES = ["America/Detroit"]
+COMMON_TIMEZONES = list(dict.fromkeys([*PINNED_TIMEZONES, *pytz.common_timezones]))
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DEFAULT_CATEGORIES = ["Development", "Design", "Admin", "Support", "Meetings"]
 DEFAULT_CLIENTS = [taskLogger.DEFAULT_CLIENT]
