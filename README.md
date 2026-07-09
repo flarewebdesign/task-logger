@@ -8,7 +8,7 @@
 
 Local-first Python desktop time tracker for client work, billable hours, categories, and optional sync targets.
 
-Task Logger is built so the public repository is useful without any private infrastructure. It works as a standalone desktop app that stores settings in `config.json` and tasks in `task_log.xlsx`. If you have your own dashboard, you can opt into token-authenticated API sync without making the dashboard required for local users.
+Task Logger is a lightweight work ledger for freelancers, studios, and small teams that want fast local time capture before they need a full platform. The core workflow stays portable and private: settings live in `config.json`, entries live in `task_log.xlsx`, and hosted services are optional. When a private reporting dashboard exists, Task Logger can sync through a small bearer-token API without coupling day-to-day tracking to that dashboard.
 
 ## What It Does
 
