@@ -1,8 +1,9 @@
 # taskListGUI.py
 
-from datetime import datetime
+import threading
 import tkinter as tk
 import tkinter.ttk as ttk
+from datetime import datetime
 from tkinter import messagebox
 
 import customtkinter as ctk
@@ -20,14 +21,45 @@ class TaskListPanel(ctk.CTkFrame):
         self.task_log = task_log
         self.on_task_changed = on_task_changed
         self.timezones = pytz.common_timezones
+        self.search_var = tk.StringVar()
+        self.billing_filter_var = tk.StringVar(value="All billing")
+        self.summary_var = tk.StringVar(value="Loading tasks...")
+        self._last_load_error = ""
+        self._sync_actions_by_task_id = {}
 
         self._setup_treeview()
         self._setup_buttons()
         self.refresh()
 
     def _setup_treeview(self):
+        toolbar = ctk.CTkFrame(self, fg_color="transparent")
+        toolbar.pack(fill="x", padx=10, pady=(10, 0))
+        toolbar.grid_columnconfigure(0, weight=1)
+
+        search_entry = ctk.CTkEntry(
+            toolbar,
+            textvariable=self.search_var,
+            placeholder_text="Search task, client, category, or timezone",
+        )
+        search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        search_entry.bind("<KeyRelease>", lambda _event: self.refresh())
+
+        billing_filter = ctk.CTkComboBox(
+            toolbar,
+            values=["All billing", "Billable", "No charge"],
+            variable=self.billing_filter_var,
+            width=140,
+            command=lambda _value: self.refresh(),
+        )
+        billing_filter.grid(row=0, column=1, padx=(0, 12))
+
+        summary = ctk.CTkLabel(toolbar, textvariable=self.summary_var, text_color=("gray35", "gray70"))
+        summary.grid(row=0, column=2, sticky="e")
+
         tree_container = ctk.CTkFrame(self, fg_color="transparent")
         tree_container.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
 
         columns = (
             "id",
@@ -39,22 +71,65 @@ class TaskListPanel(ctk.CTkFrame):
             "timezone",
             "hours",
             "billing",
+            "sync",
             "attendees",
             "event_id",
         )
-        self.task_tree = ttk.Treeview(tree_container, columns=columns, show="headings", selectmode="browse")
+
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "TaskLogger.Treeview",
+            background="#202020",
+            foreground="#F4F4F5",
+            fieldbackground="#202020",
+            borderwidth=0,
+            rowheight=30,
+        )
+        style.configure(
+            "TaskLogger.Treeview.Heading",
+            background="#303030",
+            foreground="#F4F4F5",
+            relief="flat",
+            padding=(8, 7),
+        )
+        style.map(
+            "TaskLogger.Treeview",
+            background=[("selected", "#1F6AA5")],
+            foreground=[("selected", "#FFFFFF")],
+        )
+
+        self.task_tree = ttk.Treeview(
+            tree_container,
+            columns=columns,
+            displaycolumns=(
+                "task",
+                "client",
+                "category",
+                "start",
+                "end",
+                "timezone",
+                "hours",
+                "billing",
+                "sync",
+            ),
+            show="headings",
+            selectmode="browse",
+            style="TaskLogger.Treeview",
+        )
 
         column_specs = {
             "id": {"text": "ID", "width": 0, "anchor": "w", "stretch": False},
-            "task": {"text": "Task", "width": 200, "anchor": "w", "stretch": True},
-            "client": {"text": "Client", "width": 140, "anchor": "w", "stretch": False},
-            "category": {"text": "Category", "width": 130, "anchor": "w", "stretch": False},
-            "start": {"text": "Start", "width": 170, "anchor": "w", "stretch": True},
-            "end": {"text": "End", "width": 170, "anchor": "w", "stretch": True},
-            "timezone": {"text": "Timezone", "width": 130, "anchor": "w", "stretch": True},
-            "hours": {"text": "Hours", "width": 80, "anchor": "e", "stretch": False},
-            "billing": {"text": "Billing", "width": 95, "anchor": "w", "stretch": False},
-            "attendees": {"text": "Attendees", "width": 280, "anchor": "w", "stretch": True},
+            "task": {"text": "Task", "width": 190, "anchor": "w", "stretch": True},
+            "client": {"text": "Client", "width": 110, "anchor": "w", "stretch": False},
+            "category": {"text": "Category", "width": 90, "anchor": "w", "stretch": False},
+            "start": {"text": "Start", "width": 125, "anchor": "w", "stretch": False},
+            "end": {"text": "End", "width": 125, "anchor": "w", "stretch": False},
+            "timezone": {"text": "Timezone", "width": 105, "anchor": "w", "stretch": False},
+            "hours": {"text": "Hours", "width": 55, "anchor": "e", "stretch": False},
+            "billing": {"text": "Billing", "width": 70, "anchor": "w", "stretch": False},
+            "sync": {"text": "Sync", "width": 95, "anchor": "w", "stretch": False},
+            "attendees": {"text": "Attendees", "width": 0, "anchor": "w", "stretch": False},
             "event_id": {"text": "Event ID", "width": 0, "anchor": "w", "stretch": False},
         }
 
@@ -68,31 +143,45 @@ class TaskListPanel(ctk.CTkFrame):
             )
 
         y_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.task_tree.yview)
-        self.task_tree.configure(yscrollcommand=y_scrollbar.set)
+        x_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.task_tree.xview)
+        self.task_tree.configure(yscrollcommand=y_scrollbar.set, xscrollcommand=x_scrollbar.set)
 
-        self.task_tree.pack(side="left", fill="both", expand=True)
-        y_scrollbar.pack(side="right", fill="y")
+        self.task_tree.grid(row=0, column=0, sticky="nsew")
+        y_scrollbar.grid(row=0, column=1, sticky="ns")
+        x_scrollbar.grid(row=1, column=0, sticky="ew")
 
         self.task_tree.bind("<Double-1>", lambda _event: self.modify_task())
+        self.task_tree.bind("<<TreeviewSelect>>", lambda _event: self._update_action_states())
+        self.task_tree.tag_configure("sync_error", foreground="#FCA5A5")
+        self.task_tree.tag_configure("delete_pending", foreground="#FCD34D")
 
     def _setup_buttons(self):
         controls = ctk.CTkFrame(self, fg_color="transparent")
         controls.pack(fill="x", padx=10, pady=10)
 
-        refresh_button = ctk.CTkButton(controls, text="Refresh", command=self.refresh)
-        refresh_button.pack(side="left", padx=(0, 10))
+        self.refresh_button = ctk.CTkButton(controls, text="Refresh", command=self.refresh)
+        self.refresh_button.pack(side="left", padx=(0, 10))
 
-        modify_button = ctk.CTkButton(controls, text="Edit Selected", command=self.modify_task)
-        modify_button.pack(side="left", padx=(0, 10))
+        self.modify_button = ctk.CTkButton(controls, text="Edit Selected", command=self.modify_task)
+        self.modify_button.pack(side="left", padx=(0, 10))
 
-        remove_button = ctk.CTkButton(
+        self.retry_button = ctk.CTkButton(
+            controls,
+            text="Retry Sync",
+            command=self.retry_sync,
+            fg_color="#7C5A16",
+            hover_color="#624711",
+        )
+
+        self.remove_button = ctk.CTkButton(
             controls,
             text="Delete Selected",
             command=self.remove_task,
             fg_color="#B93838",
             hover_color="#992E2E",
         )
-        remove_button.pack(side="left")
+        self.remove_button.pack(side="left")
+        self._update_action_states()
 
     def _selected_task_id(self):
         selected_item = self.task_tree.focus()
@@ -101,11 +190,61 @@ class TaskListPanel(ctk.CTkFrame):
         values = self.task_tree.item(selected_item).get("values", [])
         return str(values[0]) if values else ""
 
+    def _update_action_states(self):
+        task_id = self._selected_task_id()
+        state = "normal" if task_id else "disabled"
+        self.modify_button.configure(state=state)
+        self.remove_button.configure(state=state)
+
+        retry_label = self._sync_actions_by_task_id.get(task_id)
+        if retry_label:
+            self.retry_button.configure(state="normal", text=retry_label)
+            if not self.retry_button.winfo_manager():
+                self.retry_button.pack(side="left", padx=(0, 10), before=self.remove_button)
+        else:
+            self.retry_button.pack_forget()
+
+    def _run_background(self, operation, on_success, on_error):
+        def worker():
+            try:
+                result = operation()
+            except Exception as exc:
+                self.after(0, lambda error=exc: on_error(error))
+            else:
+                self.after(0, lambda value=result: on_success(value))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def refresh(self):
         self.task_tree.delete(*self.task_tree.get_children())
-        df = taskLogger.load_task_log(self.task_log)
+        self._sync_actions_by_task_id.clear()
+        try:
+            df = taskLogger.load_task_log(self.task_log)
+            self._last_load_error = ""
+        except taskLogger.TaskLogError as exc:
+            self.summary_var.set("Workbook unavailable")
+            self._update_action_states()
+            if str(exc) != self._last_load_error:
+                self._last_load_error = str(exc)
+                messagebox.showerror("Could not load task workbook", str(exc))
+            return
+
+        search_text = self.search_var.get().strip().lower()
+        billing_filter = self.billing_filter_var.get()
+        visible_rows = []
 
         for _, row in df.iterrows():
+            billing_text = "Billable" if taskLogger.is_billable(row.get("Billable")) else "No charge"
+            searchable = " ".join(
+                self._safe_text(row.get(column)) for column in ["Task", "Client", "Category", "Timezone", "Attendees"]
+            ).lower()
+            if search_text and search_text not in searchable:
+                continue
+            if billing_filter != "All billing" and billing_text != billing_filter:
+                continue
+            visible_rows.append((row, billing_text))
+
+        for row, billing_text in visible_rows:
             task_id = self._safe_text(row.get("ID"))
             task_name = self._safe_text(row.get("Task"))
             client = self._safe_text(row.get("Client")) or taskLogger.DEFAULT_CLIENT
@@ -115,7 +254,15 @@ class TaskListPanel(ctk.CTkFrame):
             timezone = self._safe_text(row.get("Timezone"))
             attendees = self._safe_text(row.get("Attendees"))
             event_id = self._safe_text(row.get("Event ID"))
-            billing_text = "Billable" if taskLogger.is_billable(row.get("Billable")) else "No charge"
+            sync_text = taskLogger.task_sync_summary(row)
+            retry_action = taskLogger.sync_retry_action(row)
+            if retry_action:
+                self._sync_actions_by_task_id[task_id] = retry_action
+            tags = ()
+            if "error" in sync_text.lower():
+                tags = ("sync_error",)
+            elif sync_text == "Delete pending":
+                tags = ("delete_pending",)
 
             hours_value = row.get("Decimal Hours")
             hours_text = ""
@@ -138,10 +285,15 @@ class TaskListPanel(ctk.CTkFrame):
                     timezone,
                     hours_text,
                     billing_text,
+                    sync_text,
                     attendees,
                     event_id,
                 ),
+                tags=tags,
             )
+
+        self.summary_var.set(f"{len(visible_rows)} of {len(df)} tasks")
+        self._update_action_states()
 
     def remove_task(self):
         task_id = self._selected_task_id()
@@ -153,9 +305,14 @@ class TaskListPanel(ctk.CTkFrame):
         if not confirmed:
             return
 
-        try:
-            config = self.get_config()
-            result = taskLogger.remove_task_from_log(
+        config = self.get_config()
+        self.remove_button.configure(state="disabled", text="Deleting...")
+        self.modify_button.configure(state="disabled")
+        self.retry_button.configure(state="disabled")
+        self.summary_var.set("Deleting task and cleaning up enabled sync targets...")
+
+        def operation():
+            return taskLogger.remove_task_from_log(
                 task_id=task_id,
                 task_log=self.task_log,
                 sync_to_google=bool(config.get("google_sync_enabled")),
@@ -166,25 +323,73 @@ class TaskListPanel(ctk.CTkFrame):
                 dashboard_api_url=config.get("dashboard_api_url", ""),
                 dashboard_api_token=config.get("dashboard_api_token", ""),
             )
-        except Exception as exc:
+
+        def on_error(exc):
+            self.remove_button.configure(text="Delete Selected")
+            self._update_action_states()
             messagebox.showerror("Delete failed", str(exc))
+
+        def on_success(result):
+            self.remove_button.configure(text="Delete Selected")
+            self.refresh()
+            if self.on_task_changed:
+                self.on_task_changed()
+
+            sync_warnings = []
+            if result.get("calendar_error"):
+                sync_warnings.append(f"Calendar cleanup failed:\n\n{result['calendar_error']}")
+            if result.get("dashboard_error"):
+                sync_warnings.append(f"Dashboard cleanup failed:\n\n{result['dashboard_error']}")
+            if sync_warnings:
+                messagebox.showwarning(
+                    "Deletion pending",
+                    "The task remains in the Excel workbook so cleanup can be retried safely:\n\n"
+                    + "\n\n".join(sync_warnings),
+                )
+
+        self._run_background(operation, on_success, on_error)
+
+    def retry_sync(self):
+        task_id = self._selected_task_id()
+        if not task_id:
+            messagebox.showwarning("No selection", "Select a task first.")
             return
 
-        self.refresh()
-        if self.on_task_changed:
-            self.on_task_changed()
+        config = self.get_config()
+        self.retry_button.configure(state="disabled", text="Retrying...")
+        self.modify_button.configure(state="disabled")
+        self.remove_button.configure(state="disabled")
+        self.summary_var.set("Retrying enabled sync targets...")
 
-        sync_warnings = []
-        if result.get("calendar_error"):
-            sync_warnings.append(f"Calendar cleanup failed:\n\n{result['calendar_error']}")
-        if result.get("dashboard_error"):
-            sync_warnings.append(f"Dashboard cleanup failed:\n\n{result['dashboard_error']}")
-        if sync_warnings:
-            messagebox.showwarning(
-                "Task deleted locally",
-                "The task was deleted locally, but one or more sync cleanups failed:\n\n"
-                + "\n\n".join(sync_warnings),
+        def operation():
+            return taskLogger.retry_task_sync(
+                task_id=task_id,
+                task_log=self.task_log,
+                sync_to_google=bool(config.get("google_sync_enabled")),
+                credentials_path=config.get("google_credentials_path", "credentials.json"),
+                token_path=config.get("google_token_path", "token.json"),
+                calendar_id=config.get("google_calendar_id", "primary"),
+                sync_to_dashboard=bool(config.get("dashboard_sync_enabled")),
+                dashboard_api_url=config.get("dashboard_api_url", ""),
+                dashboard_api_token=config.get("dashboard_api_token", ""),
             )
+
+        def on_error(exc):
+            self._update_action_states()
+            messagebox.showerror("Sync retry failed", str(exc))
+
+        def on_success(result):
+            self.refresh()
+            if self.on_task_changed:
+                self.on_task_changed()
+
+            errors = [message for message in [result.get("calendar_error"), result.get("dashboard_error")] if message]
+            if errors:
+                messagebox.showwarning("Sync still pending", "\n\n".join(errors))
+            else:
+                messagebox.showinfo("Sync complete", "The selected task is synchronized.")
+
+        self._run_background(operation, on_success, on_error)
 
     def modify_task(self):
         task_id = self._selected_task_id()
@@ -205,7 +410,7 @@ class TaskListPanel(ctk.CTkFrame):
         edit_window.transient(self.winfo_toplevel())
         edit_window.grab_set()
 
-        form = ctk.CTkFrame(edit_window, fg_color="transparent")
+        form = ctk.CTkScrollableFrame(edit_window, fg_color="transparent")
         form.pack(fill="both", expand=True, padx=20, pady=20)
         form.grid_columnconfigure(1, weight=1)
 
@@ -226,7 +431,9 @@ class TaskListPanel(ctk.CTkFrame):
             edit_window,
             "Pick Start Date",
         )
-        start_time_entry = self._create_labeled_entry(form, 4, "Start Time (HH:MM)", self._safe_text(row.get("Start Time")))
+        start_time_entry = self._create_labeled_entry(
+            form, 4, "Start Time (HH:MM)", self._safe_text(row.get("Start Time"))
+        )
 
         start_period = self._safe_text(row.get("Start AM/PM")) or "AM"
         start_period_menu = ctk.CTkOptionMenu(form, values=["AM", "PM"])
@@ -276,23 +483,41 @@ class TaskListPanel(ctk.CTkFrame):
         cancel_button.pack(side="left", padx=(0, 10))
 
         def save_changes():
-            try:
-                config = self.get_config()
-                result = taskLogger.update_task_in_log(
+            config = self.get_config()
+            values = {
+                "task_name": task_name_entry.get(),
+                "client": client_combo.get(),
+                "category": category_combo.get(),
+                "billable": bool(billable_var.get()),
+                "start_date": start_date_entry.get(),
+                "start_time": start_time_entry.get(),
+                "start_period": start_period_menu.get(),
+                "end_date": end_date_entry.get(),
+                "end_time": end_time_entry.get(),
+                "end_period": end_period_menu.get(),
+                "timezone": timezone_combo.get(),
+                "attendees": attendees_entry.get(),
+            }
+            save_button.configure(state="disabled", text="Saving...")
+            cancel_button.configure(state="disabled")
+            edit_window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+            def operation():
+                return taskLogger.update_task_in_log(
                     task_id=task_id,
-                    task_name=task_name_entry.get(),
-                    client=client_combo.get(),
-                    category=category_combo.get(),
-                    billable=bool(billable_var.get()),
-                    start_date=start_date_entry.get(),
-                    start_time=start_time_entry.get(),
-                    start_period=start_period_menu.get(),
-                    end_date=end_date_entry.get(),
-                    end_time=end_time_entry.get(),
-                    end_period=end_period_menu.get(),
-                    timezone=timezone_combo.get(),
+                    task_name=values["task_name"],
+                    client=values["client"],
+                    category=values["category"],
+                    billable=values["billable"],
+                    start_date=values["start_date"],
+                    start_time=values["start_time"],
+                    start_period=values["start_period"],
+                    end_date=values["end_date"],
+                    end_time=values["end_time"],
+                    end_period=values["end_period"],
+                    timezone=values["timezone"],
                     task_log=self.task_log,
-                    attendees=attendees_entry.get(),
+                    attendees=values["attendees"],
                     sync_to_google=bool(config.get("google_sync_enabled")),
                     credentials_path=config.get("google_credentials_path", "credentials.json"),
                     token_path=config.get("google_token_path", "token.json"),
@@ -301,26 +526,31 @@ class TaskListPanel(ctk.CTkFrame):
                     dashboard_api_url=config.get("dashboard_api_url", ""),
                     dashboard_api_token=config.get("dashboard_api_token", ""),
                 )
-            except Exception as exc:
+
+            def on_error(exc):
+                save_button.configure(state="normal", text="Save Changes")
+                cancel_button.configure(state="normal")
+                edit_window.protocol("WM_DELETE_WINDOW", edit_window.destroy)
                 messagebox.showerror("Save failed", str(exc))
-                return
 
-            self.refresh()
-            if self.on_task_changed:
-                self.on_task_changed()
-            edit_window.destroy()
+            def on_success(result):
+                self.refresh()
+                if self.on_task_changed:
+                    self.on_task_changed()
+                edit_window.destroy()
 
-            sync_warnings = []
-            if result.get("calendar_error"):
-                sync_warnings.append(f"Calendar sync failed:\n\n{result['calendar_error']}")
-            if result.get("dashboard_error"):
-                sync_warnings.append(f"Dashboard sync failed:\n\n{result['dashboard_error']}")
-            if sync_warnings:
-                messagebox.showwarning(
-                    "Saved locally",
-                    "Task changes were saved, but one or more syncs failed:\n\n"
-                    + "\n\n".join(sync_warnings),
-                )
+                sync_warnings = []
+                if result.get("calendar_error"):
+                    sync_warnings.append(f"Calendar sync failed:\n\n{result['calendar_error']}")
+                if result.get("dashboard_error"):
+                    sync_warnings.append(f"Dashboard sync failed:\n\n{result['dashboard_error']}")
+                if sync_warnings:
+                    messagebox.showwarning(
+                        "Saved locally",
+                        "Task changes were saved, but one or more syncs are pending:\n\n" + "\n\n".join(sync_warnings),
+                    )
+
+            self._run_background(operation, on_success, on_error)
 
         save_button = ctk.CTkButton(button_row, text="Save Changes", command=save_changes, fg_color="#2F8A42")
         save_button.pack(side="left")

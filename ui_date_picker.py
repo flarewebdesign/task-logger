@@ -30,7 +30,7 @@ def open_date_picker(master, entry_widget, title="Select Date"):
             "Calendar picker unavailable",
             "Install 'tkcalendar' in the same Python environment running this app.\n\n"
             f"Python: {python_path}\n"
-            f"Command: \"{python_path}\" -m pip install \"tkcalendar>=1.6.1,<2.0.0\"\n"
+            f'Command: "{python_path}" -m pip install "tkcalendar>=1.6.1,<2.0.0"\n'
             f"Import error: {TKCALENDAR_IMPORT_ERROR}\n\n"
             "You can still type dates manually in YYYY-MM-DD format.",
         )

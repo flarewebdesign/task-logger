@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("help", "setup", "setup-google", "run", "check", "smoke")]
+    [ValidateSet("help", "setup", "setup-dev", "setup-google", "run", "check", "format", "smoke", "test")]
     [string]$Task = "help"
 )
 
@@ -13,6 +13,9 @@ function Ensure-Venv {
     if (-not (Test-Path $VenvPython)) {
         Write-Host "Creating virtual environment at $VenvDir"
         & python -m venv $VenvDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not create the virtual environment."
+        }
     }
 }
 
@@ -22,6 +25,9 @@ function Run-InVenv {
         [string[]]$Arguments
     )
     & $VenvPython @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Python command failed with exit code $LASTEXITCODE."
+    }
 }
 
 function Show-Help {
@@ -33,10 +39,13 @@ function Show-Help {
     Write-Host "Tasks:"
     Write-Host "  help         Show this message"
     Write-Host "  setup        Create .venv and install core dependencies"
+    Write-Host "  setup-dev    Create .venv and install development dependencies"
     Write-Host "  setup-google Create .venv and install core + Google dependencies"
     Write-Host "  run          Launch Task Logger from .venv"
-    Write-Host "  check        Run syntax checks from .venv"
+    Write-Host "  check        Run compile, Ruff, and format checks from .venv"
+    Write-Host "  format       Format Python files with Ruff"
     Write-Host "  smoke        Run backend local-only smoke test from .venv"
+    Write-Host "  test         Run the pytest suite from .venv"
 }
 
 Push-Location $RepoRoot
@@ -57,14 +66,26 @@ try {
             Run-InVenv -Arguments @("-m", "pip", "install", "-r", "requirements-google.txt")
             Write-Host "Google-enabled setup complete."
         }
+        "setup-dev" {
+            Ensure-Venv
+            Run-InVenv -Arguments @("-m", "pip", "install", "--upgrade", "pip")
+            Run-InVenv -Arguments @("-m", "pip", "install", "-r", "requirements-dev.txt")
+            Write-Host "Development setup complete."
+        }
         "run" {
             Ensure-Venv
             Run-InVenv -Arguments @("taskLoggerGUI.py")
         }
         "check" {
             Ensure-Venv
-            Run-InVenv -Arguments @("-m", "py_compile", "taskLogger.py", "taskListGUI.py", "taskLoggerGUI.py")
-            Write-Host "Syntax checks passed."
+            Run-InVenv -Arguments @("-m", "py_compile", "taskLogger.py", "taskListGUI.py", "taskLoggerGUI.py", "secret_store.py")
+            Run-InVenv -Arguments @("-m", "ruff", "check", ".")
+            Run-InVenv -Arguments @("-m", "ruff", "format", "--check", ".")
+            Write-Host "Quality checks passed."
+        }
+        "format" {
+            Ensure-Venv
+            Run-InVenv -Arguments @("-m", "ruff", "format", ".")
         }
         "smoke" {
             Ensure-Venv
@@ -120,6 +141,13 @@ os.remove(path)
 print("Smoke test passed.")
 '@
             $smokeScript | & $VenvPython -
+            if ($LASTEXITCODE -ne 0) {
+                throw "Smoke test failed with exit code $LASTEXITCODE."
+            }
+        }
+        "test" {
+            Ensure-Venv
+            Run-InVenv -Arguments @("-m", "pytest")
         }
     }
 }

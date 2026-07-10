@@ -1,5 +1,6 @@
 # Task Logger
 
+[![CI](https://github.com/flarewebdesign/task-logger/actions/workflows/ci.yml/badge.svg)](https://github.com/flarewebdesign/task-logger/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 ![Local-first](https://img.shields.io/badge/Local--first-desktop-111827)
 ![Excel persistence](https://img.shields.io/badge/Storage-Excel-217346?logo=microsoftexcel&logoColor=white)
@@ -7,51 +8,48 @@
 ![Dashboard API optional](https://img.shields.io/badge/Dashboard%20API-optional-0F172A)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Local-first Python desktop time tracker for client work, billable hours, categories, and optional sync targets.
+Local-first Python desktop time ledger with Excel persistence and opt-in external synchronization.
 
-Task Logger is a lightweight work ledger for freelancers, studios, and small teams that want fast local time capture before they need a full platform. The core workflow stays portable and private: settings live in `config.json`, entries live in `task_log.xlsx`, and hosted services are optional. When a private reporting dashboard exists, Task Logger can sync through a small bearer-token API without coupling day-to-day tracking to that dashboard.
+Task Logger records client work, categories, billing state, and timezone-aware durations without requiring hosted infrastructure. Excel remains the local system of record. Google Calendar and private dashboard integrations extend the workflow without becoming runtime dependencies.
 
-## What It Does
+## Capabilities
 
 - Logs client work with task name, client, category, date, time, timezone, attendees, and billable state.
 - Calculates decimal hours from timezone-aware start and end times.
 - Stores all task records locally in `task_log.xlsx`.
+- Writes Excel changes atomically and keeps a rolling `task_log.backup.xlsx` recovery copy.
 - Stores local preferences, clients, categories, and optional sync settings in `config.json`.
 - Supports editing and deleting existing tasks from the desktop table.
+- Tracks Calendar and dashboard sync state per row, with manual retry from the task list.
 - Optionally syncs tasks to Google Calendar.
 - Optionally upserts and deletes time entries through a private dashboard API.
 - Optionally imports dashboard client names into the local client list.
 
-## Local-First Model
+## Architecture
 
-The desktop app does not require Google, a dashboard, Neon, Vercel, or any hosted service.
+Core operation is self-contained. Task creation, editing, deletion, filtering, and review remain available when every external integration is disabled or unreachable.
 
 Runtime files:
 
 - `config.json`: local settings created by the app when it first runs.
-- `task_log.xlsx`: local task database created by the app when it first runs.
-- Google token and credential files: only used if Google Calendar sync is enabled.
+- `task_log.xlsx`: primary local task database created by the app when it first runs.
+- `task_log.backup.xlsx`: previous valid workbook snapshot, refreshed before each replacement.
+- Google token and credential files: present only when Google Calendar synchronization is configured.
 
-These files are intentionally ignored by Git because they can contain private client, billing, and credential data.
+Task and settings writes use same-directory temporary files followed by atomic replacement. An unreadable workbook is preserved and copied to a timestamped `task_log.recovery-*.xlsx` file; it is never replaced with an empty workbook during recovery.
 
-## Where Local Clients Come From
+Runtime data and credential files are excluded from version control.
 
-Local clients are loaded from the `clients` array in `config.json`.
+## Clients and Categories
 
-Startup behavior:
+Clients and categories are local configuration values stored in `config.json`. New installations begin with an `Unassigned` client and a general-purpose category set. The Log Task and Edit Task controls read directly from these lists.
 
-1. `taskLoggerGUI.py` calls `load_config()`.
-2. If `config.json` does not exist, the app creates it from `DEFAULT_CONFIG`.
-3. The default client list is `["Unassigned"]`.
-4. The Log Task and Edit Task client dropdowns read from `config["clients"]`.
-5. Saving Settings normalizes the comma-separated Clients field and writes it back to `config.json`.
+Dashboard client import remains optional:
 
-Dashboard import is optional:
-
-- `Import From Dashboard` calls `GET /api/clients`.
-- The returned names are copied into the same local `config.json` `clients` array.
-- Importing clients does not enable task sync by itself.
-- If dashboard sync is disabled, the app still uses the local client list normally.
+- `Import From Dashboard` requests `GET /api/clients`.
+- Returned names replace the local `clients` list after normalization.
+- Client import does not enable time-entry synchronization.
+- Locally configured clients remain available without a dashboard connection.
 
 Example local client config:
 
@@ -89,7 +87,7 @@ macOS/Linux:
 source .venv/bin/activate
 ```
 
-Install the local-only dependencies:
+Install the core dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -103,7 +101,7 @@ python taskLoggerGUI.py
 
 ## Configuration
 
-The app writes `config.json` in the project root.
+Runtime settings are stored in `config.json` at the project root.
 
 Example:
 
@@ -114,7 +112,7 @@ Example:
   "clients": ["Unassigned", "Acme Studio"],
   "google_sync_enabled": false,
   "google_credentials_path": "credentials.json",
-  "google_token_path": "C:/Users/<you>/.task_logger/token.json",
+  "google_token_path": "C:/Users/example/.task_logger/token.json",
   "google_calendar_id": "primary",
   "dashboard_sync_enabled": false,
   "dashboard_api_url": "http://localhost:3000",
@@ -133,7 +131,7 @@ Settings:
 - `google_calendar_id`: Google Calendar target ID.
 - `dashboard_sync_enabled`: enables dashboard API sync calls.
 - `dashboard_api_url`: private dashboard base URL.
-- `dashboard_api_token`: dashboard bearer token.
+- `dashboard_api_token`: compatibility fallback for the dashboard bearer token. Supported operating systems store the token in the native credential store and remove it from `config.json`.
 
 ## Google Calendar Sync
 
@@ -145,7 +143,7 @@ Install the optional Google dependencies:
 pip install -r requirements-google.txt
 ```
 
-Setup:
+OAuth setup:
 
 1. Create OAuth client credentials in Google Cloud.
 2. Download the OAuth JSON file.
@@ -154,11 +152,11 @@ Setup:
 5. Set `Credentials File`, `Token Storage File`, and `Calendar ID`.
 6. Click `Connect Google` and complete browser authorization.
 
-If Calendar sync fails during add, edit, or delete, the local Excel task still saves and the app shows a warning.
+Calendar failures do not roll back the local Excel record. The affected row retains its error state for a later retry.
 
 ## Dashboard API Sync
 
-Dashboard sync is disabled by default. Enable it only when you have a compatible private API.
+Dashboard synchronization is disabled by default and targets a compatible private API.
 
 Settings required for sync:
 
@@ -176,7 +174,7 @@ Content-Type: application/json
 
 ### Import Clients
 
-Used only when the user clicks `Import From Dashboard`.
+Invoked by the `Import From Dashboard` command.
 
 ```text
 GET /api/clients
@@ -199,11 +197,11 @@ Accepted response shapes:
 }
 ```
 
-The imported names replace the local Clients field and are saved to `config.json`.
+Imported names replace the local Clients field and are persisted to `config.json`.
 
 ### Upsert Time Entry
 
-Called when adding or editing a task while dashboard sync is enabled.
+Invoked after a local add or edit when dashboard synchronization is enabled.
 
 ```text
 POST /api/time-entries
@@ -246,26 +244,29 @@ Recommended dashboard behavior:
 
 ### Delete Time Entry
 
-Called when deleting a local task while dashboard sync is enabled.
+Invoked when deleting a task that has dashboard synchronization enabled.
 
 ```text
 DELETE /api/time-entries/{external_id_or_id}
 ```
 
-The current desktop app sends the local task UUID, so the dashboard should delete by either `external_id` or native dashboard `id`.
+The path identifier is the local task UUID. Compatible APIs resolve it through `external_id` or the native dashboard ID.
 
 Valid responses:
 
 - `204 No Content`
 - `200 OK` with an empty or JSON body
 
-### Failure Behavior
+### Consistency and Retry Model
 
-Task Logger is local-first. If a dashboard request fails:
+Excel commits precede external synchronization requests. This ordering provides the following guarantees:
 
-- The local add, edit, or delete still completes.
-- The app shows a warning with the sync error.
-- The user can fix settings and retry with a future edit/save.
+- A local add or edit remains saved in Excel.
+- A failed remote deletion remains in Excel as `delete_pending` until external cleanup succeeds.
+- Calendar and dashboard status are tracked independently with their most recent errors.
+- Retry controls appear only for actionable `pending`, `error`, or `delete_pending` states.
+- Retry labels identify the affected provider: `Retry Calendar Sync`, `Retry Dashboard Sync`, or `Retry Sync` when both require attention.
+- Persisted failures remain retryable even when the corresponding integration toggle is subsequently disabled.
 
 ## Data Model
 
@@ -289,8 +290,13 @@ Task records are stored in `task_log.xlsx`.
 | `Event ID` | Google Calendar event ID when synced. |
 | `Dashboard Entry ID` | Dashboard entry ID returned by the API when synced. |
 | `Attendees` | Comma-separated attendee emails. |
+| `Google Sync Status` | Calendar state: `not_configured`, `pending`, `synced`, `error`, or `delete_pending`. |
+| `Dashboard Sync Status` | Dashboard state: `not_configured`, `pending`, `synced`, `error`, or `delete_pending`. |
+| `Google Sync Error` | Most recent Calendar sync error, if any. |
+| `Dashboard Sync Error` | Most recent dashboard sync error, if any. |
+| `Last Modified` | Local timestamp for the most recent row change. |
 
-Older task logs are repaired automatically when loaded. Missing `Client`, `Category`, `Billable`, or sync columns are added with safe defaults.
+Legacy workbooks are migrated automatically during load. Missing schema columns receive safe defaults, an existing `Event ID` backfills Calendar state to `synced`, and an existing `Dashboard Entry ID` backfills dashboard state to `synced`. Every migration creates `task_log.backup.xlsx` before replacing the workbook.
 
 ## Project Structure
 
@@ -301,10 +307,14 @@ task-logger/
   CONTRIBUTING.md
   SECURITY.md
   Makefile
+  pyproject.toml
   requirements.txt
+  requirements-dev.txt
   requirements-google.txt
+  secret_store.py
   scripts/
     tasks.ps1
+  tests/
   taskLogger.py
   taskLoggerGUI.py
   taskListGUI.py
@@ -318,23 +328,31 @@ Core modules:
 - `taskLogger.py`: validation, time calculation, Excel persistence, Google sync, and dashboard API calls.
 - `taskLoggerGUI.py`: main desktop window, form validation, settings, and add-task flow.
 - `taskListGUI.py`: task table, edit flow, delete flow, and sync cleanup warnings.
+- `secret_store.py`: operating system credential-store integration for the dashboard token.
 - `ui_date_picker.py`: date picker UI helper.
 
 ## Development
 
-Install dependencies:
+Install development dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
-Run syntax checks:
+Run lint and format checks:
 
 ```bash
-python -m py_compile taskLogger.py taskListGUI.py taskLoggerGUI.py ui_date_picker.py
+ruff check .
+ruff format --check .
 ```
 
-Run the local-only backend smoke test:
+Run the automated test suite:
+
+```bash
+pytest
+```
+
+Run the local-only CRUD smoke test:
 
 ```bash
 make smoke
@@ -344,16 +362,18 @@ Windows task shortcuts:
 
 ```powershell
 .\scripts\tasks.ps1 setup
+.\scripts\tasks.ps1 setup-dev
 .\scripts\tasks.ps1 check
+.\scripts\tasks.ps1 test
 .\scripts\tasks.ps1 smoke
 .\scripts\tasks.ps1 run
 ```
 
-## Public Repo Safety
+## Repository Safety
 
-This repository is intended to stay public. Keep private runtime files out of source control.
+Private runtime data is excluded from the public source tree.
 
-Do not commit:
+Excluded artifacts include:
 
 - `config.json`
 - `task_log.xlsx`
@@ -362,7 +382,7 @@ Do not commit:
 - Google token files
 - Dashboard API tokens
 
-The existing `.gitignore` excludes the local runtime files used by the app. Review it before adding new generated files or deployment-specific credentials.
+The project `.gitignore` covers local runtime files, backups, recovery copies, development environments, and common secret-file patterns.
 
 ## Troubleshooting
 
@@ -392,6 +412,13 @@ Dashboard task sync fails:
 - Confirm `POST /api/time-entries` accepts the documented payload.
 - Confirm `DELETE /api/time-entries/{id}` supports lookup by `external_id`.
 - Inspect the warning text shown by the desktop app.
+- Select the affected row in Task List and use the provider-specific retry action after correcting the settings.
+
+Excel workbook cannot be opened:
+
+- Close `task_log.xlsx` in Excel if it is open and retry the action.
+- Do not delete the original workbook after a read error. Task Logger creates a timestamped `.recovery-*.xlsx` copy and leaves the original untouched.
+- Use `task_log.backup.xlsx` to recover the previous valid workbook state when needed.
 
 Date or time validation errors:
 
@@ -401,7 +428,7 @@ Date or time validation errors:
 
 ## Security
 
-Task logs and client names can be sensitive billing data. Protect `task_log.xlsx` and `config.json` according to your local security requirements.
+Task logs, client names, and billing metadata are sensitive local data. File-system access controls should cover `task_log.xlsx`, its backups, recovery copies, and `config.json`. Dashboard API tokens use the operating-system credential store when available; the application reports when plaintext compatibility storage is required.
 
 For reporting security issues, see `SECURITY.md`.
 

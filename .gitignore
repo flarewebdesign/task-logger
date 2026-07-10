@@ -65,6 +65,11 @@ celerybeat-schedule
 
 # files
 config.json
+config.backup.json
+config.recovery-*.json
 credentials.json
 task_log.xlsx
+task_log.backup.xlsx
+task_log.recovery-*.xlsx
 token.json
+.task-logger-qa/
